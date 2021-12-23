@@ -17,20 +17,26 @@ def commit(*, msg: str):
   logger.debug('commit')
   logger.debug('  msg: %s', msg)
 
-def checkout(*, commit_or_branch: str, force: bool):
+def checkout(*, ref: str, force: bool):
   logger.debug('checkout')
-  logger.debug('  commit_or_branch: %s', commit_or_branch)
+  logger.debug('  ref: %s', ref)
   logger.debug('  force: %s', force)
 
-def branch(*, name: str, reference_commit_or_branch: str, force: bool):
+def branch(*, name: str, ref: str, force: bool):
   logger.debug('branch')
   logger.debug('  name: %s', name)
-  logger.debug('  reference_commit_or_branch: %s', reference_commit_or_branch)
+  logger.debug('  ref: %s', ref)
   logger.debug('  force: %s', force)
 
-def log(*, commit_or_branch: str, all: bool, oneline: bool):
+def tag(*, name: str, ref: str, force: bool):
+  logger.debug('tag')
+  logger.debug('  name: %s', name)
+  logger.debug('  ref: %s', ref)
+  logger.debug('  force: %s', force)
+
+def log(*, ref: str, all: bool, oneline: bool):
   logger.debug('log')
-  logger.debug('  commit_or_branch: %s', commit_or_branch)
+  logger.debug('  ref: %s', ref)
   logger.debug('  all: %s', all)
   logger.debug('  oneline: %s', oneline)
 
@@ -50,7 +56,7 @@ def commit_main(argv, prog):
 
 def checkout_main(argv, prog):
   parser = argparse.ArgumentParser(description="Log the current commit history", prog=prog)
-  parser.add_argument('commit_or_branch', help="The commit to checkout")
+  parser.add_argument('ref', help="The ref to checkout")
   parser.add_argument('-f', '--force', action='store_true', help="If there are uncommitted changes, automatically remove them.")
   args = parser.parse_args(argv)
   return checkout(**vars(args))
@@ -59,14 +65,22 @@ def branch_main(argv, prog):
   parser = argparse.ArgumentParser(description="Create a new branch", prog=prog)
   parser.add_argument('name', help="The name of the branch")
   # TODO: change this to optional positional
-  parser.add_argument('-r', '--reference-commit-or-branch', default='HEAD', help="The head of the new branch. By default, HEAD.")
+  parser.add_argument('-r', '--ref', default='HEAD', help="The head of the new branch. By default, HEAD.")
   parser.add_argument('-f', '--force', action='store_true', help="The head of the new branch. By default, HEAD.")
   args = parser.parse_args(argv)
   return branch(**vars(args))
 
+def tag_main(argv, prog):
+  parser = argparse.ArgumentParser(description="Create a new tag", prog=prog)
+  parser.add_argument('name', help="The name of the tag")
+  parser.add_argument('-r', '--ref', default='HEAD', help="The head of the new tag. By default, HEAD.")
+  parser.add_argument('-f', '--force', action='store_true', help="The head of the new tag. By default, HEAD.")
+  args = parser.parse_args(argv)
+  return tag(**vars(args))
+
 def log_main(argv, prog):
   parser = argparse.ArgumentParser(description="Log the current commit history", prog=prog)
-  parser.add_argument('-r', '--commit-or-branch', default='HEAD', help="The head of the branch to log. By default, HEAD.")
+  parser.add_argument('-r', '--ref', default='HEAD', help="The head of the branch to log. By default, HEAD.")
   parser.add_argument('--all', action='store_true', help="Include all branches")
   parser.add_argument('--oneline', action='store_true', help="Show commits with a single line")
   args = parser.parse_args(argv)
@@ -77,6 +91,7 @@ command_handlers = dict(
   commit = commit_main,
   checkout = checkout_main,
   branch = branch_main,
+  tag = tag_main,
   log = log_main,
 )
 
