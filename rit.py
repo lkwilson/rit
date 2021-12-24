@@ -8,12 +8,13 @@ import logging
 import os
 import sys
 from dataclasses import asdict, dataclass
-from typing import Optional, Union
+from typing import Optional
 
 
 logger = logging.getLogger(__name__)
 rit_dir_name = '.rit'
 default_branch_name = 'main'
+head_ref_name = 'HEAD'
 
 ''' UTILS '''
 
@@ -34,17 +35,12 @@ def rmfile(path: str):
     os.remove(path)
   except FileNotFoundError:
     pass  # good
-  except Exception:
-    logger.error("Tried to remove file but it failed: %s", path, exc_info=True)
 
 def rmdir(path: str):
   try:
     os.rmdir(path)
   except FileNotFoundError:
     pass  # good
-  except Exception:
-    logger.error("Unable to remove directory: %s", path, exc_info=True)
-
 
 ''' FS STRUCTS '''
 
@@ -93,7 +89,6 @@ class RitPaths:
 @dataclass
 class RefNode:
   parent_ref_id: Optional[str]
-  ref_id: str
   create_time: float
   msg: str
 
@@ -127,6 +122,9 @@ class RitError(Exception):
     self.msg = msg
     self.args = args
 
+def require(statement, msg, *args):
+  if not statement:
+    raise RitError(msg, *args)
 
 ''' MANAGERS '''
 
@@ -137,24 +135,27 @@ def get_paths():
   while not os.path.isdir(rit_dir):
     last_cwd = cwd
     cwd = os.path.dirname(cwd)
-    if last_cwd == cwd:
-      raise RitError("Unable to locate rit directory")
+    require(last_cwd != cwd, "Unable to locate rit directory")
     rit_dir = os.path.join(cwd, rit_dir_name)
   return RitPaths.build_rit_paths(rit_dir)
 
 def check_work_dir(paths: RitPaths):
   _, dirs, files = next(os.walk(paths.work))
-  assert not dirs and not files, "Dirty work directory. Is another rit command running?"
+  require(not dirs and not files, "Dirty work directory. Is another rit command running?")
 
-def get_head(paths: RitPaths):
+def read_head(paths: RitPaths):
   try:
-    with open(os.path.join(paths.refs, 'HEAD')) as fin:
+    with open(os.path.join(paths.refs, head_ref_name)) as fin:
       return HeadNode(**json.loads(fin))
   except FileNotFoundError:
     return HeadNode(None, default_branch_name)
   except Exception:
     logger.error("Unable to get current HEAD. Switching back to main branch.")
     return HeadNode(None, default_branch_name)
+
+def write_head(paths: RitPaths, head: HeadNode):
+  with open(os.path.join(paths.refs, head_ref_name), 'w') as fout:
+    json.dump(asdict(head), fout)
 
 def get_tar_path(paths: RitPaths, ref_id: str):
   return os.path.join(paths.backups, ref_id + '.tar')
@@ -178,9 +179,6 @@ def get_head_ref_id(paths: RitPaths, head: HeadNode):
   else:
     return get_branch_ref_id(paths, head.branch_name)
 
-def write_ref_node(paths: RitPaths, ref_node: RefNode):
-  pass
-
 def hash_ref(create_time: float, msg: str, snar: str, tar: str):
   logger.debug("Calculating the hash of ref")
   ref_hash = hashlib.sha1()
@@ -201,16 +199,58 @@ def hash_ref(create_time: float, msg: str, snar: str, tar: str):
 
   return ref_hash.hexdigest()
 
-def write_head(paths: RitPaths, head: HeadNode):
-  with open(os.path.join(paths.refs, 'HEAD'), 'w') as fout:
-    json.dump(asdict(head), fout)
+def read_commit(paths: RitPaths, ref_id: str):
+  with open(os.path.join(paths.commits, ref_id)) as fin:
+    return RefNode(**json.load(fin))
+
+def write_commit(paths: RitPaths, ref_node: RefNode):
+  with open(os.path.join(paths.commits, ref_node), 'w') as fout:
+    json.dump(asdict(ref_node), fout)
 
 def write_branch(paths: RitPaths, branch_name: str, ref_id: str):
   with open(os.path.join(paths.refs, branch_name), 'w') as fout:
-    fout.write(ref_id)
+    json.dump(dict(ref_id=ref_id, type='branch'), fout)
+
+def read_ref(paths: RitPaths, name: str):
+  with open(os.path.join(paths.refs, name)) as fin:
+    return json.load(fin)
+
+def read_branch(paths: RitPaths, branch_name: str):
+  ref = read_ref(paths, branch_name)
+  require(ref['type'] == 'branch', "The specified branch was a %s", ref['type'])
+  return ref['ref_id']
+
+def read_tag(paths: RitPaths, tag_name: str):
+  ref = read_ref(paths, tag_name)
+  require(ref['type'] == 'tag', "The specified tag was a %s", ref['type'])
+  return ref['ref_id']
+
+def write_tag(paths: RitPaths, tag_name: str, ref_id: str):
+  with open(os.path.join(paths.refs, tag_name), 'w') as fout:
+    json.dump(dict(ref_id=ref_id, type='tag'), fout)
+
+def is_branch(paths: RitPaths, name: str):
+  return os.path.exists(os.path.join(paths.refs, name))
+
+def resolve_ref(paths: RitPaths, ref: str):
+  try:
+    named_ref = read_ref(paths, ref)
+  except FileNotFoundError:
+    named_ref = None
+  try:
+    ref_node = read_commit(paths, ref)
+  except FileNotFoundError:
+    ref_node = None
+
+  if named_ref is not None and ref_node is not None:
+    raise RitError("That ref refers to a %s and a commit hash", named_ref['type'])
+  if named_ref is None:
+    return ref
+  else:
+    return named_ref['ref_id']
 
 def create_ref(paths: RitPaths, create_time: float, msg: str):
-  head = get_head(paths)
+  head = read_head(paths)
   parent_ref_id = get_head_ref_id(paths)
   logger.debug("Parent ref: %s", parent_ref_id)
 
@@ -254,8 +294,8 @@ def create_ref(paths: RitPaths, create_time: float, msg: str):
   tar = os.path.join(paths.backups, ref_id + '.tar')
   os.rename(work_tar, tar)
 
-  with open(os.path.join(paths.commits, ref_id), 'w') as fout:
-    json.dump(dict(parent_ref_id=parent_ref_id, create_time=create_time, msg=msg), fout)
+  ref_node = RefNode(parent_ref_id, create_time, msg)
+  write_commit(paths, ref_node)
 
   if head.ref_id is not None:
     head.ref_id = ref_id
@@ -282,7 +322,7 @@ def commit(*, msg: str):
   logger.debug('  msg: %s', msg)
 
   paths = get_paths()
-  ref = create_ref(paths, time.time(), msg)
+  create_ref(paths, time.time(), msg)
 
 def checkout(*, ref: str, force: bool):
   logger.debug('checkout')
@@ -298,6 +338,12 @@ def branch(*, name: str, ref: str, force: bool):
   logger.debug('  force: %s', force)
 
   paths = get_paths()
+  ref_id = resolve_ref(paths, ref)
+  if is_branch(paths, name) and not force:
+    logger.error("Branch already exists! Use -f")
+    return 1
+
+  write_branch(paths, name, ref_id)
 
 def tag(*, name: str, ref: str, force: bool):
   logger.debug('tag')
@@ -363,7 +409,7 @@ def branch_main(argv, prog):
   parser = argparse.ArgumentParser(description="Create a new branch", prog=prog)
   parser.add_argument('name', help="The name of the branch")
   # TODO: change this to optional positional
-  parser.add_argument('-r', '--ref', default='HEAD', help="The head of the new branch. By default, HEAD.")
+  parser.add_argument('-r', '--ref', default=head_ref_name, help="The head of the new branch. By default, HEAD.")
   parser.add_argument('-f', '--force', action='store_true', help="The head of the new branch. By default, HEAD.")
   args = parser.parse_args(argv)
   return branch(**vars(args))
@@ -371,14 +417,14 @@ def branch_main(argv, prog):
 def tag_main(argv, prog):
   parser = argparse.ArgumentParser(description="Create a new tag", prog=prog)
   parser.add_argument('name', help="The name of the tag")
-  parser.add_argument('-r', '--ref', default='HEAD', help="The head of the new tag. By default, HEAD.")
+  parser.add_argument('-r', '--ref', default=head_ref_name, help="The head of the new tag. By default, HEAD.")
   parser.add_argument('-f', '--force', action='store_true', help="The head of the new tag. By default, HEAD.")
   args = parser.parse_args(argv)
   return tag(**vars(args))
 
 def log_main(argv, prog):
   parser = argparse.ArgumentParser(description="Log the current commit history", prog=prog)
-  parser.add_argument('-r', '--ref', default='HEAD', help="The head of the branch to log. By default, HEAD.")
+  parser.add_argument('-r', '--ref', default=head_ref_name, help="The head of the branch to log. By default, HEAD.")
   parser.add_argument('--all', action='store_true', help="Include all branches")
   parser.add_argument('--oneline', action='store_true', help="Show commits with a single line")
   args = parser.parse_args(argv)
