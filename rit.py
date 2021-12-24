@@ -1,16 +1,19 @@
 #!/usr/bin/env python
 
+import json
+import time
 import argparse
 import hashlib
 import logging
 import os
 import sys
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Optional, Union
 
 
 logger = logging.getLogger(__name__)
 rit_dir_name = '.rit'
+default_branch_name = 'main'
 
 ''' UTILS '''
 
@@ -19,7 +22,28 @@ def hash_bytes(data: bytes):
 
 def hash_file(file: str):
   with open(file, 'rb') as fin:
+    # TODO: we might not be able to read backup tar files into memory. Need on
+    # the fly hashing.
     return hash_bytes(fin.read())
+
+def mkdir(path: str):
+  os.makedirs(path, exists_ok=True)
+
+def rmfile(path: str):
+  try:
+    os.remove(path)
+  except FileNotFoundError:
+    pass  # good
+  except Exception:
+    logger.error("Tried to remove file but it failed: %s", path, exc_info=True)
+
+def rmdir(path: str):
+  try:
+    os.rmdir(path)
+  except FileNotFoundError:
+    pass  # good
+  except Exception:
+    logger.error("Unable to remove directory: %s", path, exc_info=True)
 
 
 ''' FS STRUCTS '''
@@ -67,29 +91,33 @@ class RitPaths:
 ''' STRUCTS '''
 
 @dataclass
-class Commit:
-  commit_id: str
-  time: float
-  msg: str
-
-@dataclass
 class RefNode:
-  ref_node: Optional["RefNode"]
-  commit: Commit
+  parent_ref_id: Optional[str]
+  ref_id: str
+  create_time: float
+  msg: str
 
 @dataclass
 class BranchNode:
   name: str
-  ref_node: RefNode
+  ref_id: str
+
+@dataclass
+class HeadNode:
+  ref_id: Optional[str]
+  branch_name: Optional[str]
+
+  def __post_init__(self):
+    assert (self.ref_id is None) != (self.branch_name is None), "HEAD must be a branch or ref id"
 
 @dataclass
 class TagNode:
   name: str
-  ref_node: RefNode
+  ref_id: str
 
 @dataclass
 class RefTree:
-  head: Union[RefNode, BranchNode, TagNode]
+  head: HeadNode
   branch_nodes: list[BranchNode]
   tag_nodes: list[TagNode]
 
@@ -112,17 +140,130 @@ def get_paths():
     if last_cwd == cwd:
       raise RitError("Unable to locate rit directory")
     rit_dir = os.path.join(cwd, rit_dir_name)
+  return RitPaths.build_rit_paths(rit_dir)
 
 def check_work_dir(paths: RitPaths):
   _, dirs, files = next(os.walk(paths.work))
   assert not dirs and not files, "Dirty work directory. Is another rit command running?"
 
-def create_root_commit(paths: RitPaths, time: float, msg: str):
-  paths.root
-  commit_id = hash
-  root_commit = Commit(commit_id, time, msg)
-  return RefNode(ref_node=None, commit=root_commit)
+def get_head(paths: RitPaths):
+  try:
+    with open(os.path.join(paths.refs, 'HEAD')) as fin:
+      return HeadNode(**json.loads(fin))
+  except FileNotFoundError:
+    return HeadNode(None, default_branch_name)
+  except Exception:
+    logger.error("Unable to get current HEAD. Switching back to main branch.")
+    return HeadNode(None, default_branch_name)
 
+def get_tar_path(paths: RitPaths, ref_id: str):
+  return os.path.join(paths.backups, ref_id + '.tar')
+
+def get_snar_path(paths: RitPaths, ref_id: str):
+  return os.path.join(paths.backups, ref_id + '.snar')
+
+def get_branch_ref_id(paths: RitPaths, branch_name: str):
+  try:
+    with open(os.path.join(paths.refs, branch_name)) as fin:
+      return fin.read().strip()
+  except FileNotFoundError:
+    return None
+  except Exception:
+    logger.error("Unable to get branch for unexpected reasons.")
+    raise
+
+def get_head_ref_id(paths: RitPaths, head: HeadNode):
+  if head.ref_id is not None:
+    return head.ref_id
+  else:
+    return get_branch_ref_id(paths, head.branch_name)
+
+def write_ref_node(paths: RitPaths, ref_node: RefNode):
+  pass
+
+def hash_ref(create_time: float, msg: str, snar: str, tar: str):
+  logger.debug("Calculating the hash of ref")
+  ref_hash = hashlib.sha1()
+
+  ref_hash.update(b'create_time')
+  ref_hash.update(str(create_time).encode('utf-8'))
+
+  ref_hash.update(b'msg')
+  ref_hash.update(msg.encode('utf-8'))
+
+  ref_hash.update(b'snar')
+  with open(snar, 'rb') as fin:
+    ref_hash.update(fin.read())
+
+  ref_hash.update(b'tar')
+  with open(tar, 'rb') as fin:
+    ref_hash.update(fin.read())
+
+  return ref_hash.hexdigest()
+
+def write_head(paths: RitPaths, head: HeadNode):
+  with open(os.path.join(paths.refs, 'HEAD'), 'w') as fout:
+    json.dump(asdict(head), fout)
+
+def write_branch(paths: RitPaths, branch_name: str, ref_id: str):
+  with open(os.path.join(paths.refs, branch_name), 'w') as fout:
+    fout.write(ref_id)
+
+def create_ref(paths: RitPaths, create_time: float, msg: str):
+  head = get_head(paths)
+  parent_ref_id = get_head_ref_id(paths)
+  logger.debug("Parent ref: %s", parent_ref_id)
+
+  work_tar = os.path.join(paths.work, 'ref.tar')
+  logger.debug("Creating tar: %s", work_tar)
+
+  work_snar = os.path.join(paths.work, 'ref.snar')
+  logger.debug("Creating snar: %s", work_snar)
+
+  tar_cmd = ['tar', '-cg', work_snar, '-f', work_tar, paths.root, f'--exclude={rit_dir_name}']
+  logger.debug("Tar command: %s", tar_cmd)
+
+  logger.debug("Creating work directory")
+  mkdir(paths.work)
+
+  if parent_ref_id is not None:
+    head_snar = get_snar_path(paths, parent_ref_id)
+    logger.debug("Copying previous snar: %s", head_snar)
+    with open(head_snar, 'rb') as fin:
+      with open(work_snar, 'wb') as fout:
+        # TODO: This probably doesn't work with large files, and there might
+        # be a better way to copy
+        fout.write(fin.read())
+  else:
+    logger.debug("Using fresh snar file since no parent ref")
+
+  logger.debug("Creating ref backup and snar")
+  # TODO: call tar instead
+  with open(work_snar, 'w') as fout:
+    fout.write(f"This is a snar test {create_time}\n")
+  with open(work_tar, 'w') as fout:
+    fout.write(f"This is a tar test {create_time}\n")
+
+  ref_id = hash_ref(create_time, msg, work_snar, work_tar)
+
+  logger.debug("Moving working snar into backups directory")
+  snar = os.path.join(paths.backups, ref_id + '.snar')
+  os.rename(work_snar, snar)
+
+  logger.debug("Moving working tar into backups directory")
+  tar = os.path.join(paths.backups, ref_id + '.tar')
+  os.rename(work_tar, tar)
+
+  with open(os.path.join(paths.commits, ref_id), 'w') as fout:
+    json.dump(dict(parent_ref_id=parent_ref_id, create_time=create_time, msg=msg), fout)
+
+  if head.ref_id is not None:
+    head.ref_id = ref_id
+    write_head(paths, head)
+  else:
+    write_branch(paths, head.branch_name, ref_id)
+
+  return ref_id
 
 ''' API '''
 
@@ -141,6 +282,7 @@ def commit(*, msg: str):
   logger.debug('  msg: %s', msg)
 
   paths = get_paths()
+  ref = create_ref(paths, time.time(), msg)
 
 def checkout(*, ref: str, force: bool):
   logger.debug('checkout')
@@ -282,7 +424,10 @@ def main(argv):
   logger.debug("Parsed args: %s", args)
   logger.debug("Extra args: %s", sub_argv)
   setup_logger(args.verbose)
-  return command_handlers[args.command](sub_argv, prog=f'{parser.prog} {args.command}')
+  try:
+    return command_handlers[args.command](sub_argv, prog=f'{parser.prog} {args.command}')
+  except RitError as exc:
+    logger.error(exc.msg, *exc.args)
 
 if __name__ == '__main__':
   sys.exit(main(sys.argv[1:]))
