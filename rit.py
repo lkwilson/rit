@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 rit_dir_name = '.rit'
 default_branch_name = 'main'
 head_ref_name = 'HEAD'
-
+short_hash_index = 7
 
 ''' fs util '''
 
@@ -75,6 +75,30 @@ class RitPaths:
       work = work,
     )
 
+def exact_t(*types):
+  def exact_type(obj):
+    return isinstance(obj, types)
+  return exact_type
+
+def optional_t(obj_t):
+  def optional_type(obj):
+    if obj is None:
+      return True
+    else:
+      return obj_t(obj)
+  return optional_type
+
+def list_t(obj_t):
+  def list_type(obj):
+    if isinstance(obj, list):
+      return all(obj_t(val) for val in obj)
+    return False
+  return list_type
+
+def check_types(obj, type_def):
+  for key, value in type_def.items():
+    if not value(getattr(obj, key)):
+      raise TypeError(f"Element had invalid type: {key}")
 
 ''' STRUCTS '''
 
@@ -85,10 +109,24 @@ class Commit:
   create_time: float
   msg: str
 
+  def __post_init__(self):
+    check_types(self, dict(
+      parent_commit_id = optional_t(exact_t(str)),
+      commit_id = exact_t(str),
+      create_time = exact_t(float),
+      msg = exact_t(str),
+    ))
+
 @dataclass
 class Branch:
   name: str
   commit_id: str
+
+  def __post_init__(self):
+    check_types(self, dict(
+      name = exact_t(str),
+      commit_id = exact_t(str),
+    ))
 
 @dataclass
 class HeadNode:
@@ -96,7 +134,12 @@ class HeadNode:
   branch_name: Optional[str]
 
   def __post_init__(self):
-    assert (self.commit_id is None) != (self.branch_name is None), "HEAD must be a branch name or a commit id"
+    check_types(self, dict(
+      commit_id = optional_t(exact_t(str)),
+      branch_name = optional_t(exact_t(str)),
+    ))
+    if (self.commit_id is None) == (self.branch_name is None):
+      raise TypeError("HEAD must be a branch name or a commit id")
 
 class RitError(Exception):
   def __init__(self, msg, *args):
@@ -271,6 +314,7 @@ def create_commit(paths: RitPaths, create_time: float, msg: str):
   write_commit(paths, commit)
 
   update_head(paths, commit_id, head)
+  return commit
 
 def update_head(paths, commit_id, head = None):
   if head is None:
@@ -283,6 +327,11 @@ def update_head(paths, commit_id, head = None):
 
 def reset(paths: RitPaths, commit_id: str):
   logger.debug('resetting to %s', commit_id)
+
+def get_branches(paths: RitPaths):
+  for _, _, branches in os.walk(paths.branches):
+    return branches
+  return []
 
 ''' API '''
 
@@ -303,7 +352,8 @@ def commit(*, msg: str):
   logger.debug('  msg: %s', msg)
 
   paths = get_paths()
-  create_commit(paths, time.time(), msg)
+  commit = create_commit(paths, time.time(), msg)
+  logger.info("Created commit %s: %s", commit.commit_id[:short_hash_index], commit.msg)
 
 def checkout(*, ref: str, force: bool):
   logger.debug('checkout')
@@ -314,7 +364,8 @@ def checkout(*, ref: str, force: bool):
   res = resolve_ref(paths, ref)
   if res is None:
     raise RitError("Unable to resolve ref")
-  commit_id, is_ref_branch = res
+  commit, is_ref_branch = res
+  commit_id = commit.commit_id
   head = read_head(paths)
   if is_ref_branch:
     head.branch_name = ref
@@ -324,11 +375,6 @@ def checkout(*, ref: str, force: bool):
     head.commit_id = commit_id
   update_head(paths, commit_id, head)
   reset(paths, commit_id)
-
-def get_branches(paths: RitPaths):
-  for _, _, branches in os.walk(paths.branches):
-    return branches
-  return []
 
 def branch(*, name: Optional[str], ref: Optional[str], force: bool):
   '''
@@ -343,13 +389,15 @@ def branch(*, name: Optional[str], ref: Optional[str], force: bool):
 
   if name is None:
     head = read_head(paths)
-    for branch in get_branches(paths):
-      this_sym = '*' if branch == head.branch_name else ' '
-      logger.info("%s %s", this_sym, branch)
+    for branch_name in get_branches(paths):
+      this_sym = '*' if branch_name == head.branch_name else ' '
+      branch = read_branch(paths, branch_name)
+      commit = read_commit(paths, branch.commit_id)
+      logger.info("%s %s\t%s %s", this_sym, branch_name, branch.commit_id[:short_hash_index], commit.msg)
     return 0
 
   if is_branch(paths, name) and not force:
-    raise RitError('Branch already exists. Use -f to force the overwrite of it.')
+    raise RitError('Branch already exists: %s. Use -f to force the overwrite of it.', name)
 
   if ref is None:
     # create branch at head
@@ -358,15 +406,17 @@ def branch(*, name: Optional[str], ref: Optional[str], force: bool):
       logger.warning("There is no current commit. Aborting.")
       return 1
     write_branch(paths, name, head_commit_id)
+    logger.info("Created branch %s at %s", name, head_commit_id[:short_hash_index])
     return
 
   res = resolve_ref(paths, ref)
   if res is None:
     raise RitError("Unable to find reference: %s", ref)
 
-  commit_id, is_ref_branch = res
+  commit, is_ref_branch = res
   logger.debug("Reference was branch? %s", is_ref_branch)
-  write_branch(paths, name, commit_id)
+  write_branch(paths, name, commit.commit_id)
+  logger.info("Created branch %s at %s", name, commit.commit_id[:short_hash_index])
 
 def log(*, ref: str, all: bool, oneline: bool):
   logger.debug('log')
@@ -423,15 +473,15 @@ def checkout_main(argv, prog):
 def branch_main(argv, prog):
   parser = argparse.ArgumentParser(description="Create a new branch", prog=prog)
   # TODO: change this to optional positional
-  parser.add_argument('-n', '--name', help="The name of the branch")
-  parser.add_argument('-r', '--ref', help="The head of the new branch. By default, the current commit is used.")
+  parser.add_argument('name', nargs='?', help="The name of the branch to create. If omitted, lists all branches.")
+  parser.add_argument('ref', nargs='?', help="The head of the new branch. By default, the current commit is used.")
   parser.add_argument('-f', '--force', action='store_true', help="The head of the new branch. By default, the current commit is used.")
   args = parser.parse_args(argv)
   return branch(**vars(args))
 
 def log_main(argv, prog):
   parser = argparse.ArgumentParser(description="Log the current commit history", prog=prog)
-  parser.add_argument('-r', '--ref', default=head_ref_name, help="The head of the branch to log. By default, the current commit is used.")
+  parser.add_argument('ref', nargs='?', help="The head of the branch to log. By default, the current commit is used.")
   parser.add_argument('--all', action='store_true', help="Include all branches")
   parser.add_argument('--oneline', action='store_true', help="Show commits with a single line")
   args = parser.parse_args(argv)
