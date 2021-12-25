@@ -376,7 +376,40 @@ def checkout(*, ref: str, force: bool):
   update_head(paths, commit_id, head)
   reset(paths, commit_id)
 
-def branch(*, name: Optional[str], ref: Optional[str], force: bool):
+def delete_branch(paths: RitPaths, name: str):
+  raise NotImplementedError()
+
+def list_branches(paths: RitPaths):
+  head = read_head(paths)
+  for branch_name in get_branches(paths):
+    this_sym = '*' if branch_name == head.branch_name else ' '
+    branch = read_branch(paths, branch_name)
+    commit = read_commit(paths, branch.commit_id)
+    logger.info("%s %s\t%s %s", this_sym, branch_name, branch.commit_id[:short_hash_index], commit.msg)
+
+def create_branch(paths: RitPaths, name: str, ref: Optional[str]):
+  if ref is None:
+    # get commit id of head
+    head_commit_id = get_head_commit_id(paths)
+    if head_commit_id is None:
+      logger.warning("There is no current commit. Aborting.")
+      return 1
+    commit_id = head_commit_id
+
+  else:
+    # get commit id of ref
+    res = resolve_ref(paths, ref)
+    if res is None:
+      raise RitError("Unable to find reference: %s", ref)
+
+    commit, is_ref_branch = res
+    logger.debug("Reference was branch? %s", is_ref_branch)
+    commit_id = commit.commit_id
+
+  write_branch(paths, name, commit_id)
+  logger.info("Created branch %s at %s", name, commit_id[:short_hash_index])
+
+def branch(*, name: Optional[str], ref: Optional[str], force: bool, delete: bool):
   '''
   ref is a ref name or commit id or head_ref_name
   '''
@@ -384,39 +417,33 @@ def branch(*, name: Optional[str], ref: Optional[str], force: bool):
   logger.debug('  name: %s', name)
   logger.debug('  ref: %s', ref)
   logger.debug('  force: %s', force)
+  logger.debug('  delete: %s', force)
 
   paths = get_paths()
 
-  if name is None:
-    head = read_head(paths)
-    for branch_name in get_branches(paths):
-      this_sym = '*' if branch_name == head.branch_name else ' '
-      branch = read_branch(paths, branch_name)
-      commit = read_commit(paths, branch.commit_id)
-      logger.info("%s %s\t%s %s", this_sym, branch_name, branch.commit_id[:short_hash_index], commit.msg)
-    return 0
+  if delete:
+    if force:
+      raise RitError("You can't force delete branches")
+    elif name is None:
+      raise RitError("You must specify a branch to delete")
+    elif ref is not None:
+      raise RitError("You can't specify a reference branch with the delete option")
 
-  if is_branch(paths, name) and not force:
+    return delete_branch(paths, name)
+
+  elif name is None:
+    if force:
+      raise RitError("You cannot specify force while listing branches")
+    elif ref is not None:
+      raise RitError("You cannot specify a ref branch while listing branches")
+
+    return list_branches(paths)
+
+  elif is_branch(paths, name) and not force:
     raise RitError('Branch already exists: %s. Use -f to force the overwrite of it.', name)
 
-  if ref is None:
-    # create branch at head
-    head_commit_id = get_head_commit_id(paths)
-    if head_commit_id is None:
-      logger.warning("There is no current commit. Aborting.")
-      return 1
-    write_branch(paths, name, head_commit_id)
-    logger.info("Created branch %s at %s", name, head_commit_id[:short_hash_index])
-    return
-
-  res = resolve_ref(paths, ref)
-  if res is None:
-    raise RitError("Unable to find reference: %s", ref)
-
-  commit, is_ref_branch = res
-  logger.debug("Reference was branch? %s", is_ref_branch)
-  write_branch(paths, name, commit.commit_id)
-  logger.info("Created branch %s at %s", name, commit.commit_id[:short_hash_index])
+  else:
+    return create_branch(paths, name, ref)
 
 def log(*, ref: str, all: bool, oneline: bool):
   logger.debug('log')
@@ -476,6 +503,7 @@ def branch_main(argv, prog):
   parser.add_argument('name', nargs='?', help="The name of the branch to create. If omitted, lists all branches.")
   parser.add_argument('ref', nargs='?', help="The head of the new branch. By default, the current commit is used.")
   parser.add_argument('-f', '--force', action='store_true', help="The head of the new branch. By default, the current commit is used.")
+  parser.add_argument('-d', '--delete', action='store_true', help="Delete the specified branch.")
   args = parser.parse_args(argv)
   return branch(**vars(args))
 
@@ -530,6 +558,7 @@ def main(argv):
     return command_handlers[args.command](sub_argv, prog=f'{parser.prog} {args.command}')
   except RitError as exc:
     logger.error(exc.msg, *exc.args)
+    return 1
 
 if __name__ == '__main__':
   sys.exit(main(sys.argv[1:]))
