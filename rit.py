@@ -11,22 +11,16 @@ from dataclasses import asdict, dataclass
 from typing import Optional, Tuple
 
 
+''' GLOBALS '''
+
 logger = logging.getLogger(__name__)
 rit_dir_name = '.rit'
 default_branch_name = 'main'
 head_ref_name = 'HEAD'
 short_hash_index = 7
 
-''' fs util '''
 
-def mkdir(*args, exists_ok=False, **kwargs):
-  try:
-    os.mkdir(*args, **kwargs)
-  except FileExistsError:
-    if not exists_ok:
-      raise
-
-''' FS STRUCTS '''
+''' STRUCTS '''
 
 @dataclass
 class RitPaths:
@@ -75,33 +69,6 @@ class RitPaths:
       work = work,
     )
 
-def exact_t(*types):
-  def exact_type(obj):
-    return isinstance(obj, types)
-  return exact_type
-
-def optional_t(obj_t):
-  def optional_type(obj):
-    if obj is None:
-      return True
-    else:
-      return obj_t(obj)
-  return optional_type
-
-def list_t(obj_t):
-  def list_type(obj):
-    if isinstance(obj, list):
-      return all(obj_t(val) for val in obj)
-    return False
-  return list_type
-
-def check_types(obj, type_def):
-  for key, value in type_def.items():
-    if not value(getattr(obj, key)):
-      raise TypeError(f"Element had invalid type: {key}")
-
-''' STRUCTS '''
-
 @dataclass
 class Commit:
   parent_commit_id: Optional[str]
@@ -147,11 +114,47 @@ class RitError(Exception):
     self.msg = msg
     self.args = args
 
+
+''' UTIL '''
+
+def mkdir(*args, exists_ok=False, **kwargs):
+  try:
+    os.mkdir(*args, **kwargs)
+  except FileExistsError:
+    if not exists_ok:
+      raise
+
+def exact_t(*types):
+  def exact_type(obj):
+    return isinstance(obj, types)
+  return exact_type
+
+def optional_t(obj_t):
+  def optional_type(obj):
+    if obj is None:
+      return True
+    else:
+      return obj_t(obj)
+  return optional_type
+
+def list_t(obj_t):
+  def list_type(obj):
+    if isinstance(obj, list):
+      return all(obj_t(val) for val in obj)
+    return False
+  return list_type
+
+def check_types(obj, type_def):
+  for key, value in type_def.items():
+    if not value(getattr(obj, key)):
+      raise TypeError(f"Element had invalid type: {key}")
+
 def require(statement, msg, *args):
   if not statement:
     raise RitError(msg, *args)
 
-''' MANAGERS '''
+
+''' RIT DIR HELPERS '''
 
 def get_paths():
   cwd = os.path.realpath(os.getcwd())
@@ -160,20 +163,10 @@ def get_paths():
   while not os.path.isdir(rit_dir):
     last_cwd = cwd
     cwd = os.path.dirname(cwd)
-    require(last_cwd != cwd, "Unable to locate rit directory")
+    if last_cwd == cwd:
+      raise RitError("Unable to locate rit directory")
     rit_dir = os.path.join(cwd, rit_dir_name)
   return RitPaths.build_rit_paths(cwd)
-
-def read_head(paths: RitPaths):
-  try:
-    with open(os.path.join(paths.rit_dir, head_ref_name)) as fin:
-      return HeadNode(**json.load(fin))
-  except FileNotFoundError:
-    return HeadNode(None, default_branch_name)
-
-def write_head(paths: RitPaths, head: HeadNode):
-  with open(os.path.join(paths.rit_dir, head_ref_name), 'w') as fout:
-    json.dump(asdict(head), fout)
 
 def get_tar_path(paths: RitPaths, commit_id: str):
   return os.path.join(paths.backups, commit_id + '.tar')
@@ -181,16 +174,8 @@ def get_tar_path(paths: RitPaths, commit_id: str):
 def get_snar_path(paths: RitPaths, commit_id: str):
   return os.path.join(paths.backups, commit_id + '.snar')
 
-def get_head_commit_id(paths: RitPaths, head: HeadNode = None):
-  if head is None:
-    head = read_head(paths)
-  if head.commit_id is not None:
-    return head.commit_id
-  else:
-    try:
-      return read_branch(paths, head.branch_name).commit_id
-    except FileNotFoundError:
-      return None
+
+''' COMMIT HELPERS '''
 
 def hash_commit(create_time: float, msg: str, snar: str, tar: str):
   logger.debug("Calculating the hash of ref")
@@ -223,50 +208,12 @@ def write_commit(paths: RitPaths, commit: Commit):
     del data['commit_id']
     json.dump(data, fout)
 
-def write_branch(paths: RitPaths, branch_name: str, commit_id: str):
-  logger.debug("Moving branch %s to %s", branch_name, commit_id)
-  branch = Branch(branch_name, commit_id)
-  if is_commit(paths, branch_name):
-    raise RitError('Not creating a reference with the same name as a commit id')
-  data = asdict(branch)
-  del data['name']
-  with open(os.path.join(paths.branches, branch_name), 'w') as fout:
-    json.dump(data, fout)
-
-def read_branch(paths: RitPaths, name: str):
-  with open(os.path.join(paths.branches, name)) as fin:
-    branch = json.load(fin)
-    logger.debug("Branch data: %s", branch)
-    return Branch(**dict(**branch, name=name))
-
-def is_branch(paths: RitPaths, name: str):
-  try:
-    read_branch(paths, name)
-    return True
-  except FileNotFoundError:
-    return False
-
 def is_commit(paths: RitPaths, commit_id: str):
   try:
     read_commit(paths, commit_id)
     return True
   except FileNotFoundError:
     return False
-
-def resolve_ref(paths: RitPaths, ref_name_or_commit_id: str) -> Optional[Tuple[Commit, bool]]:
-  try:
-    return read_commit(paths, ref_name_or_commit_id), False
-  except FileNotFoundError:
-    pass
-  try:
-    ref = read_branch(paths, ref_name_or_commit_id)
-  except FileNotFoundError:
-    return None
-  try:
-    return read_commit(paths, ref.commit_id), True
-  except FileNotFoundError:
-    pass
-  raise RitError("Found a reference, but couldn't locate the commit!")
 
 def create_commit(paths: RitPaths, create_time: float, msg: str):
   head = read_head(paths)
@@ -316,6 +263,31 @@ def create_commit(paths: RitPaths, create_time: float, msg: str):
   update_head(paths, commit_id, head)
   return commit
 
+
+''' HEAD HELPERS '''
+
+def read_head(paths: RitPaths):
+  try:
+    with open(os.path.join(paths.rit_dir, head_ref_name)) as fin:
+      return HeadNode(**json.load(fin))
+  except FileNotFoundError:
+    return HeadNode(None, default_branch_name)
+
+def write_head(paths: RitPaths, head: HeadNode):
+  with open(os.path.join(paths.rit_dir, head_ref_name), 'w') as fout:
+    json.dump(asdict(head), fout)
+
+def get_head_commit_id(paths: RitPaths, head: HeadNode = None):
+  if head is None:
+    head = read_head(paths)
+  if head.commit_id is not None:
+    return head.commit_id
+  else:
+    try:
+      return read_branch(paths, head.branch_name).commit_id
+    except FileNotFoundError:
+      return None
+
 def update_head(paths, commit_id, head = None):
   if head is None:
     head = read_head(paths)
@@ -325,13 +297,97 @@ def update_head(paths, commit_id, head = None):
     write_branch(paths, head.branch_name, commit_id)
   write_head(paths, head)
 
+
+''' RESET HELPERS '''
+
 def reset(paths: RitPaths, commit_id: str):
   logger.debug('resetting to %s', commit_id)
+
+
+''' BRANCH HELPERS '''
+
+def write_branch(paths: RitPaths, branch_name: str, commit_id: str):
+  logger.debug("Moving branch %s to %s", branch_name, commit_id)
+  branch = Branch(branch_name, commit_id)
+  if is_commit(paths, branch_name):
+    raise RitError('Not creating a reference with the same name as a commit id')
+  data = asdict(branch)
+  del data['name']
+  with open(os.path.join(paths.branches, branch_name), 'w') as fout:
+    json.dump(data, fout)
+
+def read_branch(paths: RitPaths, name: str):
+  with open(os.path.join(paths.branches, name)) as fin:
+    branch = json.load(fin)
+    logger.debug("Branch data: %s", branch)
+    return Branch(**dict(**branch, name=name))
+
+def resolve_ref(paths: RitPaths, ref_name_or_commit_id: str) -> Optional[Tuple[Commit, bool]]:
+  try:
+    return read_commit(paths, ref_name_or_commit_id), False
+  except FileNotFoundError:
+    pass
+  try:
+    ref = read_branch(paths, ref_name_or_commit_id)
+  except FileNotFoundError:
+    return None
+  try:
+    return read_commit(paths, ref.commit_id), True
+  except FileNotFoundError:
+    pass
+  raise RitError("Found a reference, but couldn't locate the commit!")
+
+def is_branch(paths: RitPaths, name: str):
+  try:
+    read_branch(paths, name)
+    return True
+  except FileNotFoundError:
+    return False
 
 def get_branches(paths: RitPaths):
   for _, _, branches in os.walk(paths.branches):
     return branches
   return []
+
+
+''' SUB BRANCH COMMANDS '''
+
+def delete_branch(paths: RitPaths, name: str):
+  raise NotImplementedError()
+
+def list_branches(paths: RitPaths):
+  head = read_head(paths)
+  for branch_name in get_branches(paths):
+    this_sym = '*' if branch_name == head.branch_name else ' '
+    branch = read_branch(paths, branch_name)
+    commit = read_commit(paths, branch.commit_id)
+    logger.info("%s %s\t%s %s", this_sym, branch_name, branch.commit_id[:short_hash_index], commit.msg)
+
+def create_branch(paths: RitPaths, name: str, ref: Optional[str], force: bool):
+  if is_branch(paths, name) and not force:
+    raise RitError('Branch already exists: %s. Use -f to force the overwrite of it.', name)
+
+  elif ref is None:
+    # get commit id of head
+    head_commit_id = get_head_commit_id(paths)
+    if head_commit_id is None:
+      logger.warning("There is no current commit. Aborting.")
+      return 1
+    commit_id = head_commit_id
+
+  else:
+    # get commit id of ref
+    res = resolve_ref(paths, ref)
+    if res is None:
+      raise RitError("Unable to find reference: %s", ref)
+
+    commit, is_ref_branch = res
+    logger.debug("Reference was branch? %s", is_ref_branch)
+    commit_id = commit.commit_id
+
+  write_branch(paths, name, commit_id)
+  logger.info("Created branch %s at %s", name, commit_id[:short_hash_index])
+
 
 ''' API '''
 
@@ -376,39 +432,6 @@ def checkout(*, ref: str, force: bool):
   update_head(paths, commit_id, head)
   reset(paths, commit_id)
 
-def delete_branch(paths: RitPaths, name: str):
-  raise NotImplementedError()
-
-def list_branches(paths: RitPaths):
-  head = read_head(paths)
-  for branch_name in get_branches(paths):
-    this_sym = '*' if branch_name == head.branch_name else ' '
-    branch = read_branch(paths, branch_name)
-    commit = read_commit(paths, branch.commit_id)
-    logger.info("%s %s\t%s %s", this_sym, branch_name, branch.commit_id[:short_hash_index], commit.msg)
-
-def create_branch(paths: RitPaths, name: str, ref: Optional[str]):
-  if ref is None:
-    # get commit id of head
-    head_commit_id = get_head_commit_id(paths)
-    if head_commit_id is None:
-      logger.warning("There is no current commit. Aborting.")
-      return 1
-    commit_id = head_commit_id
-
-  else:
-    # get commit id of ref
-    res = resolve_ref(paths, ref)
-    if res is None:
-      raise RitError("Unable to find reference: %s", ref)
-
-    commit, is_ref_branch = res
-    logger.debug("Reference was branch? %s", is_ref_branch)
-    commit_id = commit.commit_id
-
-  write_branch(paths, name, commit_id)
-  logger.info("Created branch %s at %s", name, commit_id[:short_hash_index])
-
 def branch(*, name: Optional[str], ref: Optional[str], force: bool, delete: bool):
   '''
   ref is a ref name or commit id or head_ref_name
@@ -439,11 +462,8 @@ def branch(*, name: Optional[str], ref: Optional[str], force: bool, delete: bool
 
     return list_branches(paths)
 
-  elif is_branch(paths, name) and not force:
-    raise RitError('Branch already exists: %s. Use -f to force the overwrite of it.', name)
-
   else:
-    return create_branch(paths, name, ref)
+    return create_branch(paths, name, ref, force)
 
 def log(*, ref: str, all: bool, oneline: bool):
   logger.debug('log')
@@ -499,7 +519,6 @@ def checkout_main(argv, prog):
 
 def branch_main(argv, prog):
   parser = argparse.ArgumentParser(description="Create a new branch", prog=prog)
-  # TODO: change this to optional positional
   parser.add_argument('name', nargs='?', help="The name of the branch to create. If omitted, lists all branches.")
   parser.add_argument('ref', nargs='?', help="The head of the new branch. By default, the current commit is used.")
   parser.add_argument('-f', '--force', action='store_true', help="The head of the new branch. By default, the current commit is used.")
@@ -522,6 +541,9 @@ command_handlers = dict(
   branch = branch_main,
   log = log_main,
 )
+
+
+''' MAIN '''
 
 def setup_logger(verbose: int):
   black, red, green, yellow, blue, magenta, cyan, white = range(8)

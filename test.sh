@@ -30,3 +30,4 @@ python rit.py $verbose branch -d new -f && bad
 python rit.py $verbose branch -d && bad
 python rit.py $verbose branch || bad
 python rit.py $verbose branch -d new || bad
+python rit.py $verbose branch -d new && bad
