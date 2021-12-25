@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 
 bad() {
+  set +x
   echo "Test failed!"
   exit 1
 }
 
-set -ex
 rm -rf .rit
 verbose=-v
+
+set -ex
 python rit.py $verbose init || bad
 python rit.py $verbose init && bad
 python rit.py $verbose branch first && bad
@@ -30,4 +32,9 @@ python rit.py $verbose branch -d new -f && bad
 python rit.py $verbose branch -d && bad
 python rit.py $verbose branch || bad
 python rit.py $verbose branch -d new || bad
+python rit.py $verbose branch || bad
 python rit.py $verbose branch -d new && bad
+set +x
+
+echo "Success!"
+exit 0

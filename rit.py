@@ -353,7 +353,11 @@ def get_branches(paths: RitPaths):
 ''' SUB BRANCH COMMANDS '''
 
 def delete_branch(paths: RitPaths, name: str):
-  raise NotImplementedError()
+  try:
+    os.remove(os.path.join(paths.branches, name))
+  except FileNotFoundError:
+    raise RitError("Branch not found: %s", name)
+
 
 def list_branches(paths: RitPaths):
   head = read_head(paths)
