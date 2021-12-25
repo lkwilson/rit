@@ -77,7 +77,7 @@ class Commit:
   msg: str
 
   def __post_init__(self):
-    check_types(self, dict(
+    check_obj_types(self, dict(
       parent_commit_id = optional_t(exact_t(str)),
       commit_id = exact_t(str),
       create_time = exact_t(float),
@@ -90,7 +90,7 @@ class Branch:
   commit_id: str
 
   def __post_init__(self):
-    check_types(self, dict(
+    check_obj_types(self, dict(
       name = exact_t(str),
       commit_id = exact_t(str),
     ))
@@ -101,7 +101,7 @@ class HeadNode:
   branch_name: Optional[str]
 
   def __post_init__(self):
-    check_types(self, dict(
+    check_obj_types(self, dict(
       commit_id = optional_t(exact_t(str)),
       branch_name = optional_t(exact_t(str)),
     ))
@@ -144,10 +144,15 @@ def list_t(obj_t):
     return False
   return list_type
 
-def check_types(obj, type_def):
-  for key, value in type_def.items():
-    if not value(getattr(obj, key)):
-      raise TypeError(f"Element had invalid type: {key}")
+def check_types(**type_defs):
+  for name, (obj, type_def) in type_defs.items():
+    if not type_def(obj):
+      raise TypeError(f"Element had invalid type: {name}: {type(obj)}")
+
+def check_obj_types(obj, type_defs):
+  objs = {}
+  for key, type_def in type_defs.items():
+    objs[key] = (getattr(obj, key), type_def)
 
 def require(statement, msg, *args):
   if not statement:
@@ -410,6 +415,9 @@ def init():
 def commit(*, msg: str):
   logger.debug('commit')
   logger.debug('  msg: %s', msg)
+  check_types(
+    msg = (msg, exact_t(str)),
+  )
 
   paths = get_paths()
   commit = create_commit(paths, time.time(), msg)
@@ -419,6 +427,10 @@ def checkout(*, ref: str, force: bool):
   logger.debug('checkout')
   logger.debug('  ref: %s', ref)
   logger.debug('  force: %s', force)
+  check_types(
+    ref = (ref, optional_t(exact_t(str))),
+    force = (force, exact_t(bool)),
+  )
 
   paths = get_paths()
   res = resolve_ref(paths, ref)
@@ -445,6 +457,12 @@ def branch(*, name: Optional[str], ref: Optional[str], force: bool, delete: bool
   logger.debug('  ref: %s', ref)
   logger.debug('  force: %s', force)
   logger.debug('  delete: %s', force)
+  check_types(
+    name = (name, optional_t(exact_t(str))),
+    ref = (ref, optional_t(exact_t(str))),
+    force = (force, exact_t(bool)),
+    delete = (delete, exact_t(bool)),
+  )
 
   paths = get_paths()
 
@@ -469,11 +487,16 @@ def branch(*, name: Optional[str], ref: Optional[str], force: bool, delete: bool
   else:
     return create_branch(paths, name, ref, force)
 
-def log(*, ref: str, all: bool, oneline: bool):
+def log(*, ref: Optional[str], all: bool, oneline: bool):
   logger.debug('log')
   logger.debug('  ref: %s', ref)
   logger.debug('  all: %s', all)
   logger.debug('  oneline: %s', oneline)
+  check_types(
+    ref = (ref, optional_t(exact_t(str))),
+    all = (all, exact_t(bool)),
+    oneline = (oneline, exact_t(bool)),
+  )
 
   paths = get_paths()
 
