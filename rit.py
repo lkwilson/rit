@@ -1,15 +1,16 @@
 #!/usr/bin/env python
 
-import json
-import time
 import argparse
+import datetime
 import hashlib
+import json
 import logging
 import os
+import re
 import sys
+import time
 from dataclasses import asdict, dataclass
 from typing import Optional, Tuple
-
 
 ''' GLOBALS '''
 
@@ -18,7 +19,9 @@ rit_dir_name = '.rit'
 default_branch_name = 'main'
 head_ref_name = 'HEAD'
 short_hash_index = 7
-
+fg = 30
+bg = 40
+black, red, green, yellow, blue, magenta, cyan, white = range(8)
 
 ''' STRUCTS '''
 
@@ -116,6 +119,14 @@ class RitError(Exception):
 
 
 ''' UTIL '''
+
+def colorize(color: int, msg: str):
+  reset_seq = "\033[0m"
+  color_seq = "\033[1;{}m"
+
+  color_section = color_seq + "{}" + reset_seq
+
+  return color_section.format(color, msg)
 
 def mkdir(*args, exists_ok=False, **kwargs):
   try:
@@ -354,12 +365,90 @@ def get_branches(paths: RitPaths):
     return branches
   return []
 
+branch_name_re = re.compile('^\\w+$')
+def validate_branch_name(name: str):
+  if branch_name_re.search(name) is None:
+    raise RitError("Invalid branch name: %s", name)
+
+def get_commit_ids_to_branches_map(paths: RitPaths):
+  branches = get_branches(paths)
+  commit_ids_to_branches: dict[str, list[Branch]] = {}
+  for branch_name in branches:
+    branch = read_branch(paths, branch_name)
+    if branch.commit_id not in commit_ids_to_branches:
+      commit_ids_to_branches[branch.commit_id] = [branch]
+    else:
+      commit_ids_to_branches[branch.commit_id].append(branch)
+  return commit_ids_to_branches
+
+def pprint_dur(dur: int, name: str):
+  return f"{dur} {name}{'s' if dur > 1 else ''}"
+
+def pprint_time_duration(start: float, end: float):
+  start_dt = datetime.datetime.fromtimestamp(start)
+  end_dt = datetime.datetime.fromtimestamp(end)
+  dur = end - start
+  dur_sec = dur
+  dur_min = dur / 60
+  dur_hour = dur_min / 60
+  dur_day = dur_hour / 24
+  dur_month = 12 * (end_dt.year - start_dt.year) + (end_dt.month - start_dt.month)
+  dur_year = dur_month // 12
+
+  parts = []
+  if dur_year >= 5:
+    parts.append(pprint_dur(int(dur_year), 'year'))
+  elif dur_year >= 1:
+    parts.append(pprint_dur(int(dur_year), 'year'))
+    parts.append(pprint_dur(int(dur_month) % 12, 'month'))
+  elif dur_month >= 1:
+    parts.append(pprint_dur(int(dur_month) % 12, 'month'))
+  elif dur_day >= 1:
+    parts.append(pprint_dur(int(dur_day), 'day'))
+  elif dur_hour >= 1:
+    parts.append(pprint_dur(int(dur_hour) % 60, 'hour'))
+  elif dur_min >= 1:
+    parts.append(pprint_dur(int(dur_min) % 60, 'minute'))
+  elif dur_sec >= 20:
+    parts.append(pprint_dur(int(dur_sec) % 60, 'second'))
+  else:
+    return 'Just now'
+  return ', '.join(parts) + ' ago'
 
 ''' SUB LOG COMMANDS '''
 
 def log_commit(paths: RitPaths, commit_id: str):
-  raise NotImplementedError()
+  head_commit = read_commit(paths, commit_id)
+  # map to commit_id to parent commit object
+  commit_map = {}
 
+  commit = head_commit
+  while commit.parent_commit_id is not None:
+    if commit.parent_commit_id in commit_map:
+      break
+    parent_commit = read_commit(paths, commit.parent_commit_id)
+    commit_map[commit.commit_id] = parent_commit
+    commit = parent_commit
+
+  commit_ids_to_branches = get_commit_ids_to_branches_map(paths)
+
+  now = time.time()
+  commit = head_commit
+  while commit is not None:
+    colored_commit_id = colorize(fg + yellow, commit.commit_id[:short_hash_index])
+
+    if commit.commit_id in commit_ids_to_branches:
+      branches = commit_ids_to_branches[commit.commit_id]
+      colored_branch_names = map(lambda branch: colorize(fg + green, branch.name), branches)
+      branch_details = f"({', '.join(colored_branch_names)}) "
+    else:
+      branch_details = ''
+
+    time_duration = pprint_time_duration(commit.create_time, now)
+    date_details = f'({time_duration}) '
+
+    logger.info("* %s %s%s%s", colored_commit_id, date_details, branch_details, commit.msg)
+    commit = commit_map.get(commit.commit_id)
 
 ''' SUB BRANCH COMMANDS '''
 
@@ -376,7 +465,9 @@ def list_branches(paths: RitPaths):
     this_sym = '*' if branch_name == head.branch_name else ' '
     branch = read_branch(paths, branch_name)
     commit = read_commit(paths, branch.commit_id)
-    logger.info("%s %s\t%s %s", this_sym, branch_name, branch.commit_id[:short_hash_index], commit.msg)
+    colored_commit_id = colorize(fg + yellow, branch.commit_id[:short_hash_index])
+    colored_branch_name = colorize(fg + green, branch_name)
+    logger.info("%s %s\t%s %s", this_sym, colored_branch_name, colored_commit_id, commit.msg)
 
 def get_head_or_ref(paths: RitPaths, ref: Optional[str]):
   '''
@@ -503,17 +594,17 @@ def branch(*, name: Optional[str], ref: Optional[str], force: bool, delete: bool
     return list_branches(paths)
 
   else:
+    validate_branch_name(name)
+
     return create_branch(paths, name, ref, force)
 
-def log(*, ref: Optional[str], all: bool, oneline: bool):
+def log(*, ref: Optional[str], all: bool):
   logger.debug('log')
   logger.debug('  ref: %s', ref)
   logger.debug('  all: %s', all)
-  logger.debug('  oneline: %s', oneline)
   check_types(
     ref = (ref, optional_t(exact_t(str))),
     all = (all, exact_t(bool)),
-    oneline = (oneline, exact_t(bool)),
   )
 
   paths = get_paths()
@@ -524,7 +615,7 @@ def log(*, ref: Optional[str], all: bool, oneline: bool):
   res = get_head_or_ref(paths, ref)
   if res is None:
     if ref is None:
-      raise RitError("No commits in history.")
+      logger.info("No commits in history.")
     else:
       raise RitError("Unable to locate commit for provided ref: %s", ref)
   commit_id, is_ref_branch = res
@@ -587,7 +678,6 @@ def log_main(argv, prog):
   parser = argparse.ArgumentParser(description="Log the current commit history", prog=prog)
   parser.add_argument('ref', nargs='?', help="The head of the branch to log. By default, the current commit is used.")
   parser.add_argument('--all', action='store_true', help="Include all branches")
-  parser.add_argument('--oneline', action='store_true', help="Show commits with a single line")
   args = parser.parse_args(argv)
   return log(**vars(args))
 
@@ -603,15 +693,9 @@ command_handlers = dict(
 ''' MAIN '''
 
 def setup_logger(verbose: int):
-  black, red, green, yellow, blue, magenta, cyan, white = range(8)
-  reset_seq = "\033[0m"
-  color_seq = "\033[1;{}m"
-
-  color_section = color_seq + "{}" + reset_seq
-
-  if verbose == 0:
+  if verbose == -1:
     level = logging.WARNING
-  elif verbose == 1:
+  elif verbose == 0:
     level = logging.INFO
   else:
     level = logging.DEBUG
@@ -620,19 +704,20 @@ def setup_logger(verbose: int):
 
   logging.basicConfig(level=level, format=format)
 
-  logging.addLevelName(logging.DEBUG, color_section.format(30 + blue, logging.getLevelName(logging.DEBUG)[0]))
-  logging.addLevelName(logging.INFO, color_section.format(30 + green, logging.getLevelName(logging.INFO)[0]))
-  logging.addLevelName(logging.WARNING, color_section.format(30 + yellow, logging.getLevelName(logging.WARNING)[0]))
-  logging.addLevelName(logging.ERROR, color_section.format(30 + red, logging.getLevelName(logging.ERROR)[0]))
+  logging.addLevelName(logging.DEBUG, colorize(fg + blue, logging.getLevelName(logging.DEBUG)[0]))
+  logging.addLevelName(logging.INFO, colorize(fg + green, logging.getLevelName(logging.INFO)[0]))
+  logging.addLevelName(logging.WARNING, colorize(fg + yellow, logging.getLevelName(logging.WARNING)[0]))
+  logging.addLevelName(logging.ERROR, colorize(fg + red, logging.getLevelName(logging.ERROR)[0]))
 
 def main(argv):
   parser = argparse.ArgumentParser(description="A raw version control system", add_help=False)
   parser.add_argument('command', choices=command_handlers.keys())
-  parser.add_argument('--verbose', '-v', action='count', default=0)
+  parser.add_argument('--verbose', '-v', help="Increase logging level. Default level is info.", action='count', default=0)
+  parser.add_argument('--quiet', '-q', help="Decrease logging level. Default level is info.", action='count', default=0)
   args, sub_argv = parser.parse_known_args(argv)
   logger.debug("Parsed args: %s", args)
   logger.debug("Extra args: %s", sub_argv)
-  setup_logger(args.verbose)
+  setup_logger(args.verbose - args.quiet)
   try:
     return command_handlers[args.command](sub_argv, prog=f'{parser.prog} {args.command}')
   except RitError as exc:
