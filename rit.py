@@ -355,6 +355,12 @@ def get_branches(paths: RitPaths):
   return []
 
 
+''' SUB LOG COMMANDS '''
+
+def log_commit(paths: RitPaths, commit_id: str):
+  raise NotImplementedError()
+
+
 ''' SUB BRANCH COMMANDS '''
 
 def delete_branch(paths: RitPaths, name: str):
@@ -372,28 +378,40 @@ def list_branches(paths: RitPaths):
     commit = read_commit(paths, branch.commit_id)
     logger.info("%s %s\t%s %s", this_sym, branch_name, branch.commit_id[:short_hash_index], commit.msg)
 
-def create_branch(paths: RitPaths, name: str, ref: Optional[str], force: bool):
-  if is_branch(paths, name) and not force:
-    raise RitError('Branch already exists: %s. Use -f to force the overwrite of it.', name)
-
-  elif ref is None:
+def get_head_or_ref(paths: RitPaths, ref: Optional[str]):
+  '''
+  Returns None if head has no commits, or if ref was not found.
+  Returns commit_id, is_ref_branch otherwise.
+  '''
+  if ref is None:
     # get commit id of head
     head_commit_id = get_head_commit_id(paths)
     if head_commit_id is None:
-      logger.warning("There is no current commit. Aborting.")
-      return 1
-    commit_id = head_commit_id
+      return None
+    else:
+      return head_commit_id, False
 
   else:
     # get commit id of ref
     res = resolve_ref(paths, ref)
     if res is None:
-      raise RitError("Unable to find reference: %s", ref)
+      return None
 
     commit, is_ref_branch = res
-    logger.debug("Reference was branch? %s", is_ref_branch)
-    commit_id = commit.commit_id
+    return commit.commit_id, is_ref_branch
 
+def create_branch(paths: RitPaths, name: str, ref: Optional[str], force: bool):
+  if is_branch(paths, name) and not force:
+    raise RitError('Branch already exists: %s. Use -f to force the overwrite of it.', name)
+
+  res = get_head_or_ref(paths, ref)
+  if res is None:
+    if ref is None:
+      raise RitError("No current commit to create branch for.")
+    else:
+      raise RitError("Unable to locate commit for provided ref: %s", ref)
+  logger.info("Resolved ref: %s: %s", ref, res)
+  commit_id, is_ref_branch = res
   write_branch(paths, name, commit_id)
   logger.info("Created branch %s at %s", name, commit_id[:short_hash_index])
 
@@ -499,6 +517,18 @@ def log(*, ref: Optional[str], all: bool, oneline: bool):
   )
 
   paths = get_paths()
+
+  if all:
+    raise NotImplementedError()
+
+  res = get_head_or_ref(paths, ref)
+  if res is None:
+    if ref is None:
+      raise RitError("No commits in history.")
+    else:
+      raise RitError("Unable to locate commit for provided ref: %s", ref)
+  commit_id, is_ref_branch = res
+  log_commit(paths, commit_id)
 
 def reflog():
   logger.debug('reflog')
