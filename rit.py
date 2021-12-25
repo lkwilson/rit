@@ -124,7 +124,7 @@ def get_paths():
 def read_head(paths: RitPaths):
   try:
     with open(os.path.join(paths.rit_dir, head_ref_name)) as fin:
-      return HeadNode(**json.loads(fin))
+      return HeadNode(**json.load(fin))
   except FileNotFoundError:
     return HeadNode(None, default_branch_name)
 
@@ -171,7 +171,7 @@ def hash_commit(create_time: float, msg: str, snar: str, tar: str):
 
 def read_commit(paths: RitPaths, commit_id: str):
   with open(os.path.join(paths.commits, commit_id)) as fin:
-    return Commit(dict(**json.load(fin), commit_id=commit_id))
+    return Commit(**dict(**json.load(fin), commit_id=commit_id))
 
 def write_commit(paths: RitPaths, commit: Commit):
   logger.debug("Creating commit entry: %s", commit.commit_id)
@@ -192,7 +192,9 @@ def write_branch(paths: RitPaths, branch_name: str, commit_id: str):
 
 def read_branch(paths: RitPaths, name: str):
   with open(os.path.join(paths.branches, name)) as fin:
-    return Branch(dict(**json.load(fin), name=name))
+    branch = json.load(fin)
+    logger.debug("Branch data: %s", branch)
+    return Branch(**dict(**branch, name=name))
 
 def is_branch(paths: RitPaths, name: str):
   try:
@@ -218,7 +220,7 @@ def resolve_ref(paths: RitPaths, ref_name_or_commit_id: str) -> Optional[Tuple[C
   except FileNotFoundError:
     return None
   try:
-    return read_commit(ref.commit_id), True
+    return read_commit(paths, ref.commit_id), True
   except FileNotFoundError:
     pass
   raise RitError("Found a reference, but couldn't locate the commit!")
@@ -248,7 +250,7 @@ def create_commit(paths: RitPaths, create_time: float, msg: str):
   else:
     logger.debug("Using fresh snar file since no parent commit")
 
-  logger.debug("Creating ref backup and snar")
+  logger.debug("Calling tar")
   # TODO: call tar instead
   with open(work_snar, 'w') as fout:
     fout.write(f"This is a snar test {create_time}\n")
@@ -275,9 +277,12 @@ def update_head(paths, commit_id, head = None):
     head = read_head(paths)
   if head.commit_id is not None:
     head.commit_id = commit_id
-    write_head(paths, head)
   else:
     write_branch(paths, head.branch_name, commit_id)
+  write_head(paths, head)
+
+def reset(paths: RitPaths, commit_id: str):
+  logger.debug('resetting to %s', commit_id)
 
 ''' API '''
 
@@ -306,8 +311,26 @@ def checkout(*, ref: str, force: bool):
   logger.debug('  force: %s', force)
 
   paths = get_paths()
+  res = resolve_ref(paths, ref)
+  if res is None:
+    raise RitError("Unable to resolve ref")
+  commit_id, is_ref_branch = res
+  head = read_head(paths)
+  if is_ref_branch:
+    head.branch_name = ref
+    head.commit_id = None
+  else:
+    head.branch_name = None
+    head.commit_id = commit_id
+  update_head(paths, commit_id, head)
+  reset(paths, commit_id)
 
-def branch(*, name: str, ref: Optional[str], force: bool):
+def get_branches(paths: RitPaths):
+  for _, _, branches in os.walk(paths.branches):
+    return branches
+  return []
+
+def branch(*, name: Optional[str], ref: Optional[str], force: bool):
   '''
   ref is a ref name or commit id or head_ref_name
   '''
@@ -318,8 +341,15 @@ def branch(*, name: str, ref: Optional[str], force: bool):
 
   paths = get_paths()
 
-  if is_branch(name) and not force:
-    raise RitError('Branch already exists. Use -f to force the overwrite of it.', name)
+  if name is None:
+    head = read_head(paths)
+    for branch in get_branches(paths):
+      this_sym = '*' if branch == head.branch_name else ' '
+      logger.info("%s %s", this_sym, branch)
+    return 0
+
+  if is_branch(paths, name) and not force:
+    raise RitError('Branch already exists. Use -f to force the overwrite of it.')
 
   if ref is None:
     # create branch at head
@@ -392,8 +422,8 @@ def checkout_main(argv, prog):
 
 def branch_main(argv, prog):
   parser = argparse.ArgumentParser(description="Create a new branch", prog=prog)
-  parser.add_argument('name', help="The name of the branch")
   # TODO: change this to optional positional
+  parser.add_argument('-n', '--name', help="The name of the branch")
   parser.add_argument('-r', '--ref', help="The head of the new branch. By default, the current commit is used.")
   parser.add_argument('-f', '--force', action='store_true', help="The head of the new branch. By default, the current commit is used.")
   args = parser.parse_args(argv)
