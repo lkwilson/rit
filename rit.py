@@ -406,8 +406,9 @@ def check_tar():
   process = subprocess.Popen(['tar', '--version'], stdout=subprocess.PIPE)
   contents = process.stdout.read()
   process.wait()
-  logger.debug("Tar contents:\n%s", contents.decode('utf-8'))
-  assert 'GNU tar' in contents.decode('utf-8').split('\n', 1)[0], "You must have a GNU tar installed"
+  version = contents.decode('utf-8').split('\n', 1)[0]
+  logger.debug("Tar Version: %s", version)
+  assert 'GNU tar' in version, "You must have a GNU tar installed"
 
 def create_commit(rit: RitCache, create_time: float, msg: str):
   head = rit.head
@@ -415,10 +416,10 @@ def create_commit(rit: RitCache, create_time: float, msg: str):
   logger.debug("Parent ref: %s", parent_commit_id)
 
   work_tar = os.path.join(rit.paths.work, 'ref.tar')
-  logger.debug("Creating tar: %s", work_tar)
+  logger.debug("Working tar: %s", work_tar)
 
   work_snar = os.path.join(rit.paths.work, 'ref.snar')
-  logger.debug("Creating snar: %s", work_snar)
+  logger.debug("Working snar: %s", work_snar)
 
   if parent_commit_id is not None:
     head_snar = get_snar_path(rit, parent_commit_id)
@@ -428,9 +429,9 @@ def create_commit(rit: RitCache, create_time: float, msg: str):
     logger.debug("Using fresh snar file since no parent commit")
 
   check_tar()
-  tar_cmd = ['tar', '-cg', work_snar, f'--exclude={rit_dir_name}', '-f', work_tar, rit.paths.root]
+  tar_cmd = ['tar', '-czg', work_snar, f'--exclude={rit_dir_name}', '-f', work_tar, '.']
   logger.debug("Running tar command: %s", tar_cmd)
-  process = subprocess.Popen(tar_cmd)
+  process = subprocess.Popen(tar_cmd, cwd=rit.paths.root)
   # TODO: doesn't forward SIGTERM, only SIGINT
   exit_code = process.wait()
   if exit_code != 0:

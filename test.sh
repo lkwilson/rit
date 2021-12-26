@@ -23,6 +23,7 @@ python "$rit_bin" "$@" init || bad
 python "$rit_bin" "$@" init && bad
 python "$rit_bin" "$@" branch first && bad
 python "$rit_bin" "$@" commit "Hey there" || bad
+touch a
 python "$rit_bin" "$@" branch first || bad
 python "$rit_bin" "$@" branch 'invalid name' && bad
 python "$rit_bin" "$@" branch 'invalid!name' && bad
@@ -32,10 +33,12 @@ python "$rit_bin" "$@" branch 'invalid_name ' && bad
 python "$rit_bin" "$@" branch 'invalid-name' && bad
 python "$rit_bin" "$@" branch || bad
 python "$rit_bin" "$@" commit "Oh hey there" || bad
+touch b
 python "$rit_bin" "$@" branch || bad
 python "$rit_bin" "$@" branch new || bad
 python "$rit_bin" "$@" branch || bad
 python "$rit_bin" "$@" commit "move main" || bad
+touch c
 python "$rit_bin" "$@" branch || bad
 python "$rit_bin" "$@" branch new main && bad
 python "$rit_bin" "$@" branch || bad
