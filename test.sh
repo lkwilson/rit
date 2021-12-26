@@ -41,7 +41,7 @@ python rit.py "$@" branch -d new || bad
 python rit.py "$@" branch || bad
 python rit.py "$@" branch -d new && bad
 python rit.py "$@" log || bad
-# python rit.py "$@" log --all || bad
+python rit.py "$@" log --all || bad
 python rit.py "$@" checkout && bad
 python rit.py "$@" checkout first || bad
 python rit.py "$@" log || bad

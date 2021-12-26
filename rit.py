@@ -131,7 +131,7 @@ class RitCache:
   _commits: dict[str, Commit] = field(default_factory=dict)
   _branches: dict[str, Branch] = field(default_factory=dict)
   _branch_name_to_commit_ids: dict[str, str] = None
-  _commit_id_to_branch_names: dict[str, str] = None
+  _commit_id_to_branch_names: dict[str, list[str]] = None
   _branch_names: list[str] = None
   _commit_ids: list[str] = None
   _short_commit_tree: dict[str, list[str]] = None
@@ -225,12 +225,16 @@ class RitCache:
   def populate_commit_to_branch_map(self):
     branch_names = self.get_branch_names()
     self._branch_name_to_commit_ids = {}
-    self._commit_id_to_branch_names = {}
+    self._commit_id_to_branch_names = defaultdict(list)
     for branch_name in branch_names:
       branch = self.get_branch(branch_name, ensure=True)
       commit_id = branch.commit_id
       self._branch_name_to_commit_ids[branch_name] = commit_id
-      self._commit_id_to_branch_names[commit_id] = branch_name
+      self._commit_id_to_branch_names[commit_id].append(branch_name)
+    head_commit_id = self.get_head_commit_id()
+    if head_commit_id is not None:
+      self._branch_name_to_commit_ids[head_ref_name] = head_commit_id
+      self._commit_id_to_branch_names[head_commit_id].append(head_ref_name)
 
   def get_branch_name_to_commit_ids(self):
     if self._branch_name_to_commit_ids is None:
@@ -579,36 +583,43 @@ def pprint_time_duration(start: float, end: float):
 
 ''' SUB LOG COMMANDS '''
 
-def log_commit(rit: RitCache, commit_id: str):
-  head_commit = rit.get_commit(commit_id, ensure=True)
-  # map to commit_id to parent commit object
-  commit_map = {}
+def log_commit(rit: RitCache, commits: list[Commit]):
+  leafs = set()
+  commit_graph = {}
+  for commit in commits:
+    if commit.commit_id not in commit_graph:
+      leafs.add(commit.commit_id)
+    while True:
+      commit_graph[commit.commit_id] = commit.parent_commit_id
+      if commit.parent_commit_id is None:
+        break
+      parent_commit = rit.get_commit(commit.parent_commit_id, ensure=True)
+      if parent_commit.commit_id in leafs:
+        leafs.remove(parent_commit.commit_id)
 
-  commit = head_commit
-  while commit.parent_commit_id is not None:
-    if commit.parent_commit_id in commit_map:
-      break
-    parent_commit = read_commit(paths, commit.parent_commit_id)
-    commit_map[commit.commit_id] = parent_commit
-    commit = parent_commit
+      commit = parent_commit
 
   now = time.time()
-  commit = head_commit
-  while commit is not None:
-    colored_commit_id = colorize(fg + yellow, commit.commit_id[:short_hash_index])
+  commit_id_to_branch_names = rit.get_commit_id_to_branch_names()
+  for commit_id in leafs:
+    logger.info("Log branch from %s", commit_id[:short_hash_index])
+    while commit_id is not None:
+      commit = rit.get_commit(commit_id, ensure=True)
 
-    if commit.commit_id in commit_ids_to_branches:
-      branches = commit_ids_to_branches[commit.commit_id]
-      colored_branch_names = map(lambda branch: colorize(fg + green, branch.name), branches)
-      branch_details = f"({', '.join(colored_branch_names)}) "
-    else:
-      branch_details = ''
+      colored_commit_id = colorize(fg + yellow, commit.commit_id[:short_hash_index])
 
-    time_duration = pprint_time_duration(commit.create_time, now)
-    date_details = f'({time_duration}) '
+      if commit.commit_id in commit_id_to_branch_names:
+        branch_names = commit_id_to_branch_names[commit.commit_id]
+        colored_branch_names = map(lambda branch_name: colorize(fg + green, branch_name), branch_names)
+        branch_details = f"({', '.join(colored_branch_names)}) "
+      else:
+        branch_details = ''
 
-    logger.info("* %s %s%s%s", colored_commit_id, date_details, branch_details, commit.msg)
-    commit = commit_map.get(commit.commit_id)
+      time_duration = pprint_time_duration(commit.create_time, now)
+      date_details = f'({time_duration}) '
+
+      logger.info("* %s %s%s%s", colored_commit_id, date_details, branch_details, commit.msg)
+      commit_id = commit_graph[commit_id]
 
 ''' SUB BRANCH COMMANDS '''
 
@@ -747,7 +758,7 @@ def log(*, refs: list[str], all: bool, full: bool):
   log_refs(rit, refs, all, full)
 
 def log_refs(rit: RitCache, refs: list[str], all: bool, full: bool):
-  commits = set()
+  commits = []
 
   if not refs:
     refs.append(None)
@@ -760,7 +771,7 @@ def log_refs(rit: RitCache, refs: list[str], all: bool, full: bool):
         raise RitError("head branch doesn't have any commits")
       else:
         raise RitError("Unable to locate ref: %s", ref)
-    commits.add(res.commit)
+    commits.append(res.commit)
 
   log_commit(rit, commits)
 
