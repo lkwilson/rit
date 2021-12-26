@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 
+import subprocess
+import shutil
 import copy
 import argparse
 import datetime
@@ -11,7 +13,7 @@ import re
 import sys
 import time
 from dataclasses import asdict, dataclass, field
-from typing import Optional
+from typing import ContextManager, Optional
 from collections import defaultdict
 
 ''' GLOBALS '''
@@ -399,6 +401,14 @@ def hash_commit(create_time: float, msg: str, snar: str, tar: str):
 
   return ref_hash.hexdigest()
 
+def check_tar():
+  logger.debug("Checking tar version")
+  process = subprocess.Popen(['tar', '--version'], stdout=subprocess.PIPE)
+  contents = process.stdout.read()
+  process.wait()
+  logger.debug("Tar contents:\n%s", contents.decode('utf-8'))
+  assert 'GNU tar' in contents.decode('utf-8').split('\n', 1)[0], "You must have a GNU tar installed"
+
 def create_commit(rit: RitCache, create_time: float, msg: str):
   head = rit.head
   parent_commit_id = rit.get_head_commit_id()
@@ -410,26 +420,21 @@ def create_commit(rit: RitCache, create_time: float, msg: str):
   work_snar = os.path.join(rit.paths.work, 'ref.snar')
   logger.debug("Creating snar: %s", work_snar)
 
-  tar_cmd = ['tar', '-cg', work_snar, '-f', work_tar, rit.paths.root, f'--exclude={rit_dir_name}']
-  logger.debug("Tar command: %s", tar_cmd)
-
   if parent_commit_id is not None:
     head_snar = get_snar_path(rit, parent_commit_id)
     logger.debug("Copying previous snar: %s", head_snar)
-    with open(head_snar, 'rb') as fin:
-      with open(work_snar, 'wb') as fout:
-        # TODO: This probably doesn't work with large files, and there might
-        # be a better way to copy
-        fout.write(fin.read())
+    shutil.copyfile(head_snar, work_snar)
   else:
     logger.debug("Using fresh snar file since no parent commit")
 
-  logger.debug("Calling tar")
-  # TODO: call tar instead
-  with open(work_snar, 'w') as fout:
-    fout.write(f"This is a snar test {create_time}\n")
-  with open(work_tar, 'w') as fout:
-    fout.write(f"This is a tar test {create_time}\n")
+  check_tar()
+  tar_cmd = ['tar', '-cg', work_snar, f'--exclude={rit_dir_name}', '-f', work_tar, rit.paths.root]
+  logger.debug("Running tar command: %s", tar_cmd)
+  process = subprocess.Popen(tar_cmd)
+  # TODO: doesn't forward SIGTERM, only SIGINT
+  exit_code = process.wait()
+  if exit_code != 0:
+    raise RitError("Creating commit's tar failed with exit code: %d", exit_code)
 
   commit_id = hash_commit(create_time, msg, work_snar, work_tar)
 

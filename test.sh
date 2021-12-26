@@ -6,9 +6,16 @@ bad() {
   exit 1
 }
 
-rm -rf .rit
+set -e
 
-set -ex
+cd "$(dirname "$(realpath "$BASH_SOURCE")")"
+rm -rf rit_test_dir
+mkdir rit_test_dir
+cd rit_test_dir
+
+
+
+set -x
 nosetests
 python rit.py "$@" init || bad
 python rit.py "$@" init && bad
