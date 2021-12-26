@@ -666,6 +666,38 @@ def create_branch(rit: RitCache, name: str, ref: Optional[str], force: bool):
   rit.set_branch(branch)
   logger.info("Created branch %s at %s", name, commit_id[:short_hash_index])
 
+def log_refs(rit: RitCache, refs: list[str], all: bool, full: bool):
+  commits = []
+
+  if not refs:
+    refs.append(None)
+  if all:
+    refs.extend(rit.get_branch_names())
+  for ref in refs:
+    res = resolve_ref(rit, ref)
+    if res.commit is None:
+      if res.head is not None:
+        raise RitError("head branch doesn't have any commits")
+      else:
+        raise RitError("Unable to locate ref: %s", ref)
+    commits.append(res.commit)
+
+  log_commit(rit, commits)
+
+def show_ref(rit: RitCache, ref: Optional[str]):
+  res = resolve_ref(rit, ref)
+  if res.commit is None:
+    if res.head is not None:
+      raise RitError("head branch doesn't have any commits to show")
+    else:
+      raise RitError("Unable to locate ref: %s", ref)
+
+  tar_file = get_tar_path(rit, res.commit.commit_id)
+  tar_cmd = ['tar', '-tf', tar_file]
+  process = subprocess.Popen(tar_cmd)
+  results = process.wait()
+  if results != 0:
+    logger.error("tar command failed with exit code %d", results)
 
 ''' API '''
 
@@ -776,23 +808,13 @@ def log(*, refs: list[str], all: bool, full: bool):
   rit = RitCache()
   log_refs(rit, refs, all, full)
 
-def log_refs(rit: RitCache, refs: list[str], all: bool, full: bool):
-  commits = []
+def show(*, ref: Optional[str]):
+  logger.debug('log')
+  logger.debug('  ref: %s', ref)
+  check_types(ref = (ref, optional_t(exact_t(str))))
 
-  if not refs:
-    refs.append(None)
-  if all:
-    refs.extend(rit.get_branch_names())
-  for ref in refs:
-    res = resolve_ref(rit, ref)
-    if res.commit is None:
-      if res.head is not None:
-        raise RitError("head branch doesn't have any commits")
-      else:
-        raise RitError("Unable to locate ref: %s", ref)
-    commits.append(res.commit)
-
-  log_commit(rit, commits)
+  rit = RitCache()
+  show_ref(rit, ref)
 
 def reflog():
   logger.debug('reflog')
@@ -844,6 +866,12 @@ def branch_main(argv, prog):
   args = parser.parse_args(argv)
   return branch(**vars(args))
 
+def show_main(argv, prog):
+  parser = argparse.ArgumentParser(description="Show contents of a commit", prog=prog)
+  parser.add_argument('ref', nargs='?', help="The ref to show commit contents of. By default, head.")
+  args = parser.parse_args(argv)
+  return show(**vars(args))
+
 def log_main(argv, prog):
   parser = argparse.ArgumentParser(description="Log the current commit history", prog=prog)
   parser.add_argument('refs', nargs='*', help="The refs to log. By default, the current head is used.")
@@ -857,6 +885,7 @@ command_handlers = dict(
   commit = commit_main,
   checkout = checkout_main,
   branch = branch_main,
+  show = show_main,
   log = log_main,
 )
 
