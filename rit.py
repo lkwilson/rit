@@ -180,9 +180,10 @@ class RitCache:
     if head.commit_id is not None:
       return head.commit_id
     else:
-      try:
-        return self.get_branch(head.branch_name, ensure=True).commit_id
-      except FileNotFoundError:
+      branch = self.get_branch(head.branch_name)
+      if branch is not None:
+        return branch.commit_id
+      else:
         return None
 
   def get_commit_ids(self):
@@ -409,7 +410,7 @@ def create_commit(rit: RitCache, create_time: float, msg: str):
   logger.debug("Tar command: %s", tar_cmd)
 
   if parent_commit_id is not None:
-    head_snar = get_snar_path(rit.paths, parent_commit_id)
+    head_snar = get_snar_path(rit, parent_commit_id)
     logger.debug("Copying previous snar: %s", head_snar)
     with open(head_snar, 'rb') as fin:
       with open(work_snar, 'wb') as fout:
@@ -429,17 +430,16 @@ def create_commit(rit: RitCache, create_time: float, msg: str):
   commit_id = hash_commit(create_time, msg, work_snar, work_tar)
 
   logger.debug("Moving working snar into backups directory")
-  snar = get_snar_path(rit.paths, commit_id)
+  snar = get_snar_path(rit, commit_id)
   os.rename(work_snar, snar)
 
   logger.debug("Moving working tar into backups directory")
-  tar = get_tar_path(rit.paths, commit_id)
+  tar = get_tar_path(rit, commit_id)
   os.rename(work_tar, tar)
 
   commit = Commit(parent_commit_id, commit_id, create_time, msg)
   rit.set_commit(commit)
-
-  update_head(rit, commit_id, head)
+  update_head(rit, commit.commit_id)
   return commit
 
 
