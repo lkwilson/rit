@@ -410,12 +410,13 @@ def check_tar():
   logger.debug("Tar Version: %s", version)
   assert 'GNU tar' in version, "You must have a GNU tar installed"
 
-def create_commit(rit: RitCache, create_time: float, msg: str):
-  head = rit.head
-  parent_commit_id = rit.get_head_commit_id()
+def create_commit_tar(*,
+      rit: RitCache,
+      work_tar: str,
+      parent_commit_id: Optional[str],
+      verbose: bool,
+      compress: bool):
   logger.debug("Parent ref: %s", parent_commit_id)
-
-  work_tar = os.path.join(rit.paths.work, 'ref.tar')
   logger.debug("Working tar: %s", work_tar)
 
   work_snar = os.path.join(rit.paths.work, 'ref.snar')
@@ -429,13 +430,28 @@ def create_commit(rit: RitCache, create_time: float, msg: str):
     logger.debug("Using fresh snar file since no parent commit")
 
   check_tar()
-  tar_cmd = ['tar', '-czg', work_snar, f'--exclude={rit_dir_name}', '-f', work_tar, '.']
+  opts = '-c'
+  if verbose:
+    opts += 'v'
+  if compress:
+    opts += 'z'
+  opts += 'g'
+  tar_cmd = ['tar', opts, work_snar, f'--exclude={rit_dir_name}', '-f', work_tar, '.']
   logger.debug("Running tar command: %s", tar_cmd)
   process = subprocess.Popen(tar_cmd, cwd=rit.paths.root)
   # TODO: doesn't forward SIGTERM, only SIGINT
   exit_code = process.wait()
   if exit_code != 0:
     raise RitError("Creating commit's tar failed with exit code: %d", exit_code)
+
+  return work_snar
+
+def create_commit(rit: RitCache, create_time: float, msg: str):
+  work_tar = os.path.join(rit.paths.work, 'ref.tar')
+  parent_commit_id = rit.get_head_commit_id()
+  compress = True
+  verbose = logger.getEffectiveLevel() <= logging.DEBUG
+  work_snar = create_commit_tar(rit=rit, parent_commit_id=parent_commit_id, work_tar=work_tar, verbose=verbose, compress=compress)
 
   commit_id = hash_commit(create_time, msg, work_snar, work_tar)
 
@@ -699,6 +715,14 @@ def show_ref(rit: RitCache, ref: Optional[str]):
   if results != 0:
     logger.error("tar command failed with exit code %d", results)
 
+def status_head(rit: RitCache):
+  work_tar = os.devnull
+  parent_commit_id = rit.get_head_commit_id()
+  compress = False
+  verbose = True
+  work_snar = create_commit_tar(rit=rit, parent_commit_id=parent_commit_id, work_tar=work_tar, verbose=verbose, compress=compress)
+  os.remove(work_snar)
+
 ''' API '''
 
 def init():
@@ -809,12 +833,18 @@ def log(*, refs: list[str], all: bool, full: bool):
   log_refs(rit, refs, all, full)
 
 def show(*, ref: Optional[str]):
-  logger.debug('log')
+  logger.debug('show')
   logger.debug('  ref: %s', ref)
   check_types(ref = (ref, optional_t(exact_t(str))))
 
   rit = RitCache()
   show_ref(rit, ref)
+
+def status():
+  logger.debug('status')
+
+  rit = RitCache()
+  status_head(rit)
 
 def reflog():
   logger.debug('reflog')
@@ -872,6 +902,11 @@ def show_main(argv, prog):
   args = parser.parse_args(argv)
   return show(**vars(args))
 
+def status_main(argv, prog):
+  parser = argparse.ArgumentParser(description="Show the current directory's diff state.", prog=prog)
+  args = parser.parse_args(argv)
+  return status(**vars(args))
+
 def log_main(argv, prog):
   parser = argparse.ArgumentParser(description="Log the current commit history", prog=prog)
   parser.add_argument('refs', nargs='*', help="The refs to log. By default, the current head is used.")
@@ -886,6 +921,7 @@ command_handlers = dict(
   checkout = checkout_main,
   branch = branch_main,
   show = show_main,
+  status = status_main,
   log = log_main,
 )
 

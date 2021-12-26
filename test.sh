@@ -62,6 +62,7 @@ python "$rit_bin" "$@" log --all || bad
 python "$rit_bin" "$@" checkout main || bad
 python "$rit_bin" "$@" log || bad
 python "$rit_bin" "$@" show || bad
+python "$rit_bin" "$@" status || bad
 
 set +x
 
