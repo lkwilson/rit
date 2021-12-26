@@ -46,6 +46,7 @@ python rit.py "$@" checkout && bad
 python rit.py "$@" checkout first || bad
 python rit.py "$@" log || bad
 python rit.py "$@" log main || bad
+python rit.py "$@" log --all || bad
 python rit.py "$@" checkout main || bad
 python rit.py "$@" log || bad
 

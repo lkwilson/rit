@@ -443,19 +443,13 @@ def create_commit(rit: RitCache, create_time: float, msg: str):
 
   commit = Commit(parent_commit_id, commit_id, create_time, msg)
   rit.set_commit(commit)
-  update_head(rit, commit.commit_id)
-  return commit
-
-
-''' HEAD HELPERS '''
-
-def update_head(rit: RitCache, commit_id: str):
   head = copy.copy(rit.head)
   if head.commit_id is not None:
     head.commit_id = commit_id
   else:
     rit.set_branch(Branch(head.branch_name, commit_id))
   rit.set_head(head)
+  return commit
 
 
 ''' RESET HELPERS '''
@@ -610,7 +604,12 @@ def log_commit(rit: RitCache, commits: list[Commit]):
 
       if commit.commit_id in commit_id_to_branch_names:
         branch_names = commit_id_to_branch_names[commit.commit_id]
-        colored_branch_names = map(lambda branch_name: colorize(fg + green, branch_name), branch_names)
+        colored_branch_names = []
+        for branch_name in branch_names:
+          if branch_name == head_ref_name:
+            colored_branch_names.append(colorize(fg + yellow, branch_name))
+          else:
+            colored_branch_names.append(colorize(fg + green, branch_name))
         branch_details = f"({', '.join(colored_branch_names)}) "
       else:
         branch_details = ''
@@ -696,11 +695,18 @@ def checkout(*, ref: str, force: bool):
   res = resolve_ref(rit, ref)
   if res.head is not None:
     raise RitError("Attempted to checkout head ref")
-  elif res.commit is not None:
+  elif res.commit is None:
     raise RitError("Unable to resolve ref to commit: %s", ref)
   commit_id = res.commit.commit_id
   reset(rit, commit_id)
-  update_head(rit, commit_id)
+  head = copy.copy(rit.head)
+  if res.branch is not None:
+    head.branch_name = res.branch.name
+    head.commit_id = None
+  else:
+    head.branch_name = None
+    head.commit_id = commit_id
+  rit.set_head(head)
 
 def branch(*, name: Optional[str], ref: Optional[str], force: bool, delete: bool):
   '''
