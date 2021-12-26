@@ -13,7 +13,7 @@ import re
 import sys
 import time
 from dataclasses import asdict, dataclass, field
-from typing import ContextManager, Optional
+from typing import Optional
 from collections import defaultdict
 
 ''' GLOBALS '''
@@ -502,6 +502,7 @@ class ResolvedRef:
   '''
 
 def resolve_commit(rit: RitCache, partial_commit_id: str):
+  logger.debug("Resolving commit: %s", partial_commit_id)
   commit = rit.get_commit(partial_commit_id)
   if commit is not None:
     return commit
@@ -518,9 +519,10 @@ def resolve_commit(rit: RitCache, partial_commit_id: str):
       if commit is not None:
         raise RitError("Reference %s matched commits %s and %s", partial_commit_id, commit.commit_id, commit_id)
       commit = rit.get_commit(commit_id, ensure=True)
-  return None
+  return commit
 
 def resolve_ref(rit: RitCache, ref: Optional[str]):
+  logger.debug("Resolving ref: %s", ref)
   res = ResolvedRef()
   if ref is None or ref == head_ref_name:
     head = rit.head
@@ -542,7 +544,9 @@ def resolve_ref(rit: RitCache, ref: Optional[str]):
 
 branch_name_re = re.compile('^\\w+$')
 def validate_branch_name(name: str):
-  if branch_name_re.search(name) is None:
+  if name == head_ref_name:
+    raise RitError("Branch can't be named the same as the head ref: %s", name)
+  elif branch_name_re.search(name) is None:
     raise RitError("Invalid branch name: %s", name)
 
 def pprint_dur(dur: int, name: str):
@@ -721,7 +725,7 @@ def branch(*, name: Optional[str], ref: Optional[str], force: bool, delete: bool
   logger.debug('  name: %s', name)
   logger.debug('  ref: %s', ref)
   logger.debug('  force: %s', force)
-  logger.debug('  delete: %s', force)
+  logger.debug('  delete: %s', delete)
   check_types(
     name = (name, optional_t(exact_t(str))),
     ref = (ref, optional_t(exact_t(str))),
@@ -730,6 +734,11 @@ def branch(*, name: Optional[str], ref: Optional[str], force: bool, delete: bool
   )
 
   rit = RitCache()
+
+  if name is not None:
+    validate_branch_name(name)
+    if rit.head.branch_name is not None and rit.head.branch_name == name:
+      raise RitError("Unable to set commit of head branch.")
 
   if delete:
     if force:
@@ -751,8 +760,6 @@ def branch(*, name: Optional[str], ref: Optional[str], force: bool, delete: bool
     return list_branches(rit)
 
   else:
-    validate_branch_name(name)
-
     return create_branch(rit, name, ref, force)
 
 def log(*, refs: list[str], all: bool, full: bool):

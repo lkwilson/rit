@@ -8,6 +8,8 @@ bad() {
 
 set -e
 
+rit_bin=../rit.py
+
 cd "$(dirname "$(realpath "$BASH_SOURCE")")"
 rm -rf rit_test_dir
 mkdir rit_test_dir
@@ -17,45 +19,45 @@ cd rit_test_dir
 
 set -x
 nosetests
-python rit.py "$@" init || bad
-python rit.py "$@" init && bad
-python rit.py "$@" branch first && bad
-python rit.py "$@" commit "Hey there" || bad
-python rit.py "$@" branch first || bad
-python rit.py "$@" branch 'invalid name' && bad
-python rit.py "$@" branch 'invalid!name' && bad
-python rit.py "$@" branch 'valid_name' || bad
-python rit.py "$@" branch ' invalid_name' && bad
-python rit.py "$@" branch 'invalid_name ' && bad
-python rit.py "$@" branch 'invalid-name' && bad
-python rit.py "$@" branch || bad
-python rit.py "$@" commit "Oh hey there" || bad
-python rit.py "$@" branch || bad
-python rit.py "$@" branch new || bad
-python rit.py "$@" branch || bad
-python rit.py "$@" commit "move main" || bad
-python rit.py "$@" branch || bad
-python rit.py "$@" branch new main && bad
-python rit.py "$@" branch || bad
-python rit.py "$@" branch new main -f || bad
-python rit.py "$@" branch || bad
-python rit.py "$@" branch -d new main && bad
-python rit.py "$@" branch -d -f && bad
-python rit.py "$@" branch -d new -f && bad
-python rit.py "$@" branch -d && bad
-python rit.py "$@" branch || bad
-python rit.py "$@" branch -d new || bad
-python rit.py "$@" branch || bad
-python rit.py "$@" branch -d new && bad
-python rit.py "$@" log || bad
-python rit.py "$@" log --all || bad
-python rit.py "$@" checkout && bad
-python rit.py "$@" checkout first || bad
-python rit.py "$@" log || bad
-python rit.py "$@" log main || bad
-python rit.py "$@" log --all || bad
-python rit.py "$@" checkout main || bad
-python rit.py "$@" log || bad
+python "$rit_bin" "$@" init || bad
+python "$rit_bin" "$@" init && bad
+python "$rit_bin" "$@" branch first && bad
+python "$rit_bin" "$@" commit "Hey there" || bad
+python "$rit_bin" "$@" branch first || bad
+python "$rit_bin" "$@" branch 'invalid name' && bad
+python "$rit_bin" "$@" branch 'invalid!name' && bad
+python "$rit_bin" "$@" branch 'valid_name' || bad
+python "$rit_bin" "$@" branch ' invalid_name' && bad
+python "$rit_bin" "$@" branch 'invalid_name ' && bad
+python "$rit_bin" "$@" branch 'invalid-name' && bad
+python "$rit_bin" "$@" branch || bad
+python "$rit_bin" "$@" commit "Oh hey there" || bad
+python "$rit_bin" "$@" branch || bad
+python "$rit_bin" "$@" branch new || bad
+python "$rit_bin" "$@" branch || bad
+python "$rit_bin" "$@" commit "move main" || bad
+python "$rit_bin" "$@" branch || bad
+python "$rit_bin" "$@" branch new main && bad
+python "$rit_bin" "$@" branch || bad
+python "$rit_bin" "$@" branch new main -f || bad
+python "$rit_bin" "$@" branch || bad
+python "$rit_bin" "$@" branch -d new main && bad
+python "$rit_bin" "$@" branch -d -f && bad
+python "$rit_bin" "$@" branch -d new -f && bad
+python "$rit_bin" "$@" branch -d && bad
+python "$rit_bin" "$@" branch || bad
+python "$rit_bin" "$@" branch -d new || bad
+python "$rit_bin" "$@" branch || bad
+python "$rit_bin" "$@" branch -d new && bad
+python "$rit_bin" "$@" log || bad
+python "$rit_bin" "$@" log --all || bad
+python "$rit_bin" "$@" checkout && bad
+python "$rit_bin" "$@" checkout first || bad
+python "$rit_bin" "$@" log || bad
+python "$rit_bin" "$@" log main || bad
+python "$rit_bin" "$@" log --all || bad
+python "$rit_bin" "$@" checkout main || bad
+python "$rit_bin" "$@" log || bad
 
 set +x
 
