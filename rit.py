@@ -515,11 +515,29 @@ def create_commit(rit: RitCache, create_time: float, msg: str):
 
 ''' RESET HELPERS '''
 
-def reset(rit: RitCache, commit_id: str, force: bool):
-  logger.debug('resetting to %s', commit_id)
+def apply_commit(rit: RitCache, commit: Commit):
+  logger.info("Applying commit: %s", commit.commit_id)
+  tar_file = get_tar_path(rit, commit.commit_id)
+  tar_cmd = ['tar', '-xg', os.devnull, '-f', tar_file]
+  process = subprocess.Popen(tar_cmd, cwd=rit.paths.root)
+  exit_code = process.wait()
+  if exit_code != 0:
+    raise RitError("Failed while trying to apply commit: %s", commit.commit_id)
+
+def reset(rit: RitCache, commit: Commit, force: bool):
+  logger.debug('resetting to %s', commit.commit_id)
 
   if status_tar(rit, False) and not force:
-    raise RitError("Uncommitted changes! Use -f or commit them.")
+    raise RitError("Uncommitted changes! Commit them or use -f to destroy them.")
+
+  commit_chain = [commit]
+  while commit.parent_commit_id is not None:
+    commit = rit.get_commit(commit.parent_commit_id, ensure=True)
+    commit_chain.append(commit)
+  commit_chain.reverse()
+
+  for commit in commit_chain:
+    apply_commit(rit, commit)
 
 ''' BRANCH HELPERS '''
 
@@ -765,6 +783,11 @@ def show_ref(rit: RitCache, ref: Optional[str]):
     logger.error("tar command failed with exit code %d", results)
 
 def status_head(rit: RitCache):
+  if rit.head.branch_name is not None:
+    head_id = rit.head.branch_name
+  else:
+    head_id = rit.head.commit_id
+  logger.info("HEAD -> %s", head_id)
   if not status_tar(rit, True):
     logger.info("Clean working directory!")
 
@@ -808,16 +831,21 @@ def checkout(*, ref: str, force: bool):
     raise RitError("Attempted to checkout head ref")
   elif res.commit is None:
     raise RitError("Unable to resolve ref to commit: %s", ref)
-  commit_id = res.commit.commit_id
-  reset(rit, commit_id, force)
+  commit = res.commit
+
+  head_commit_id = rit.get_head_commit_id()
+  if head_commit_id is not None and head_commit_id != commit.commit_id:
+    reset(rit, commit, force)
   head = copy.copy(rit.head)
   if res.branch is not None:
     head.branch_name = res.branch.name
     head.commit_id = None
   else:
     head.branch_name = None
-    head.commit_id = commit_id
+    head.commit_id = commit.commit_id
   rit.set_head(head)
+
+  logger.info("Successful checkout. Commit this checkout to get a clean rit status.")
 
 def branch(*, name: Optional[str], ref: Optional[str], force: bool, delete: bool):
   '''
