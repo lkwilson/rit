@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+from io import DEFAULT_BUFFER_SIZE
 import subprocess
 import shutil
 import copy
@@ -15,6 +16,9 @@ import time
 from dataclasses import asdict, dataclass, field
 from typing import Optional
 from collections import defaultdict
+
+
+# TODO: doesn't forward SIGTERM, only SIGINT
 
 ''' GLOBALS '''
 
@@ -410,13 +414,59 @@ def check_tar():
   logger.debug("Tar Version: %s", version)
   assert 'GNU tar' in version, "You must have a GNU tar installed"
 
-def create_commit_tar(*,
-      rit: RitCache,
-      work_tar: str,
-      parent_commit_id: Optional[str],
-      verbose: bool,
-      compress: bool):
+def status_tar(rit: RitCache, verbose: bool):
+  ''' returns True if rit directory is dirty '''
+  parent_commit_id = rit.get_head_commit_id()
+  work_snar = os.path.join(rit.paths.work, 'ref.snar')
+  if parent_commit_id is not None:
+    head_snar = get_snar_path(rit, parent_commit_id)
+    shutil.copyfile(head_snar, work_snar)
+
+  check_tar()
+  tar_cmd = ['tar', '-cvg', work_snar, f'--exclude={rit_dir_name}', '-f', os.devnull, '.']
+  logger.debug("Running tar command: %s", tar_cmd)
+
+  process = subprocess.Popen(tar_cmd, cwd=rit.paths.root, stdout=subprocess.PIPE)
+  terminated = False
+  dirty = False
+  while True:
+    line = process.stdout.readline()
+    if not line:
+      break
+
+    if line == b'./\n':
+      continue
+
+    dirty = True
+    if verbose:
+      output = line.decode('utf-8').strip()
+      logger.info("\t- %s", colorize(fg + red, output))
+    else:
+      terminated = True
+      try:
+        process.terminate()
+      except Exception:
+        pass
+      break
+
+  # still need to read the stdout to prevent blocking and therefore deadlock
+  if terminated:
+    while process.stdout.read(DEFAULT_BUFFER_SIZE):
+      pass
+
+  exit_code = process.wait()
+  if not terminated and exit_code != 0:
+    raise RitError("Creating commit's tar failed with exit code: %d", exit_code)
+
+  os.remove(work_snar)
+  return dirty
+
+def create_commit(rit: RitCache, create_time: float, msg: str):
+  head = rit.head
+  parent_commit_id = rit.get_head_commit_id()
   logger.debug("Parent ref: %s", parent_commit_id)
+
+  work_tar = os.path.join(rit.paths.work, 'ref.tar')
   logger.debug("Working tar: %s", work_tar)
 
   work_snar = os.path.join(rit.paths.work, 'ref.snar')
@@ -430,41 +480,17 @@ def create_commit_tar(*,
     logger.debug("Using fresh snar file since no parent commit")
 
   check_tar()
-  opts = '-c'
-  if verbose:
+  opts = '-cz'
+  if logger.getEffectiveLevel() <= logging.DEBUG:
     opts += 'v'
-  if compress:
-    opts += 'z'
   opts += 'g'
   tar_cmd = ['tar', opts, work_snar, f'--exclude={rit_dir_name}', '-f', work_tar, '.']
   logger.debug("Running tar command: %s", tar_cmd)
-
-  if verbose:
-    process = subprocess.Popen(tar_cmd, cwd=rit.paths.root, stdout=subprocess.PIPE)
-    # TODO: doesn't forward SIGTERM, only SIGINT
-    line = process.stdout.readline()
-    lines = []
-    while line:
-      if line != b'./\n':
-        if len(lines) < 20:
-          lines.append(line)
-        sys.stdout.buffer.write(line)
-      line = process.stdout.readline()
-  else:
-    process = subprocess.Popen(tar_cmd, cwd=rit.paths.root)
-    lines = None
+  process = subprocess.Popen(tar_cmd, cwd=rit.paths.root)
+  # TODO: doesn't forward SIGTERM, only SIGINT
   exit_code = process.wait()
   if exit_code != 0:
     raise RitError("Creating commit's tar failed with exit code: %d", exit_code)
-
-  return work_snar, lines
-
-def create_commit(rit: RitCache, create_time: float, msg: str):
-  work_tar = os.path.join(rit.paths.work, 'ref.tar')
-  parent_commit_id = rit.get_head_commit_id()
-  compress = True
-  verbose = logger.getEffectiveLevel() <= logging.DEBUG
-  work_snar, _ = create_commit_tar(rit=rit, parent_commit_id=parent_commit_id, work_tar=work_tar, verbose=verbose, compress=compress)
 
   commit_id = hash_commit(create_time, msg, work_snar, work_tar)
 
@@ -489,9 +515,12 @@ def create_commit(rit: RitCache, create_time: float, msg: str):
 
 ''' RESET HELPERS '''
 
-def reset(rit: RitCache, commit_id: str):
+def reset(rit: RitCache, commit_id: str, force: bool):
   logger.debug('resetting to %s', commit_id)
 
+  if status_tar(rit, False) and not force:
+    logger.warning("Uncommitted changes! Use -f or commit them.")
+    return 1
 
 ''' BRANCH HELPERS '''
 
@@ -723,21 +752,22 @@ def show_ref(rit: RitCache, ref: Optional[str]):
 
   tar_file = get_tar_path(rit, res.commit.commit_id)
   tar_cmd = ['tar', '-tf', tar_file]
-  process = subprocess.Popen(tar_cmd)
+  process = subprocess.Popen(tar_cmd, stdout=subprocess.PIPE)
+  while True:
+    line = process.stdout.readline()
+    if not line:
+      break
+    elif line == b'./\n':
+      continue
+    output = line.decode('utf-8').strip()
+    logger.info("\t- %s", colorize(fg + cyan, output))
   results = process.wait()
   if results != 0:
     logger.error("tar command failed with exit code %d", results)
 
 def status_head(rit: RitCache):
-  work_tar = os.devnull
-  parent_commit_id = rit.get_head_commit_id()
-  compress = False
-  verbose = True
-  work_snar, lines = create_commit_tar(rit=rit, parent_commit_id=parent_commit_id, work_tar=work_tar, verbose=verbose, compress=compress)
-  os.remove(work_snar)
-  if not lines:
+  if not status_tar(rit, True):
     logger.info("Clean working directory!")
-
 
 ''' API '''
 
@@ -780,7 +810,7 @@ def checkout(*, ref: str, force: bool):
   elif res.commit is None:
     raise RitError("Unable to resolve ref to commit: %s", ref)
   commit_id = res.commit.commit_id
-  reset(rit, commit_id)
+  reset(rit, commit_id, force)
   head = copy.copy(rit.head)
   if res.branch is not None:
     head.branch_name = res.branch.name
