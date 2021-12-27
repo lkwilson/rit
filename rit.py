@@ -519,8 +519,7 @@ def reset(rit: RitCache, commit_id: str, force: bool):
   logger.debug('resetting to %s', commit_id)
 
   if status_tar(rit, False) and not force:
-    logger.warning("Uncommitted changes! Use -f or commit them.")
-    return 1
+    raise RitError("Uncommitted changes! Use -f or commit them.")
 
 ''' BRANCH HELPERS '''
 
