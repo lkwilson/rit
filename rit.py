@@ -692,7 +692,7 @@ def log_commit(rit: RitCache, commits: list[Commit]):
         colored_branch_names = []
         for branch_name in branch_names:
           if branch_name == head_ref_name:
-            colored_branch_names.append(colorize(fg + yellow, branch_name))
+            colored_branch_names.append(colorize(fg + blue, branch_name))
           else:
             colored_branch_names.append(colorize(fg + green, branch_name))
         branch_details = f"({', '.join(colored_branch_names)}) "

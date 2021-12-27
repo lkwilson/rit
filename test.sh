@@ -69,6 +69,26 @@ python "$rit_bin" "$@" commit "post checkout commit" || bad
 python "$rit_bin" "$@" show || bad
 python "$rit_bin" "$@" status || bad
 
+python "$rit_bin" "$@" branch base || bad
+python "$rit_bin" "$@" branch add_aa || bad
+python "$rit_bin" "$@" checkout add_aa || bad
+touch aa
+python "$rit_bin" "$@" commit "add aa" || bad
+
+python "$rit_bin" "$@" branch add_bb base || bad
+python "$rit_bin" "$@" checkout add_bb -f || bad
+[ -f aa ] && bad
+touch bb
+python "$rit_bin" "$@" commit "add bb" || bad
+python "$rit_bin" "$@" checkout add_aa -f || bad
+[ -f bb ] && bad
+[ -f aa ] || bad
+python "$rit_bin" "$@" checkout add_bb -f || bad
+[ -f bb ] || bad
+[ -f aa ] && bad
+python "$rit_bin" "$@" checkout base -f || bad
+[ -f bb ] && bad
+[ -f aa ] && bad
 
 set +x
 
