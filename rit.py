@@ -438,20 +438,33 @@ def create_commit_tar(*,
   opts += 'g'
   tar_cmd = ['tar', opts, work_snar, f'--exclude={rit_dir_name}', '-f', work_tar, '.']
   logger.debug("Running tar command: %s", tar_cmd)
-  process = subprocess.Popen(tar_cmd, cwd=rit.paths.root)
-  # TODO: doesn't forward SIGTERM, only SIGINT
+
+  if verbose:
+    process = subprocess.Popen(tar_cmd, cwd=rit.paths.root, stdout=subprocess.PIPE)
+    # TODO: doesn't forward SIGTERM, only SIGINT
+    line = process.stdout.readline()
+    lines = []
+    while line:
+      if line != b'./\n':
+        if len(lines) < 20:
+          lines.append(line)
+        sys.stdout.buffer.write(line)
+      line = process.stdout.readline()
+  else:
+    process = subprocess.Popen(tar_cmd, cwd=rit.paths.root)
+    lines = None
   exit_code = process.wait()
   if exit_code != 0:
     raise RitError("Creating commit's tar failed with exit code: %d", exit_code)
 
-  return work_snar
+  return work_snar, lines
 
 def create_commit(rit: RitCache, create_time: float, msg: str):
   work_tar = os.path.join(rit.paths.work, 'ref.tar')
   parent_commit_id = rit.get_head_commit_id()
   compress = True
   verbose = logger.getEffectiveLevel() <= logging.DEBUG
-  work_snar = create_commit_tar(rit=rit, parent_commit_id=parent_commit_id, work_tar=work_tar, verbose=verbose, compress=compress)
+  work_snar, _ = create_commit_tar(rit=rit, parent_commit_id=parent_commit_id, work_tar=work_tar, verbose=verbose, compress=compress)
 
   commit_id = hash_commit(create_time, msg, work_snar, work_tar)
 
@@ -720,8 +733,11 @@ def status_head(rit: RitCache):
   parent_commit_id = rit.get_head_commit_id()
   compress = False
   verbose = True
-  work_snar = create_commit_tar(rit=rit, parent_commit_id=parent_commit_id, work_tar=work_tar, verbose=verbose, compress=compress)
+  work_snar, lines = create_commit_tar(rit=rit, parent_commit_id=parent_commit_id, work_tar=work_tar, verbose=verbose, compress=compress)
   os.remove(work_snar)
+  if not lines:
+    logger.info("Clean working directory!")
+
 
 ''' API '''
 
