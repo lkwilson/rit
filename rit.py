@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+from io import DEFAULT_BUFFER_SIZE
 import subprocess
 import shutil
 import copy
@@ -13,8 +14,11 @@ import re
 import sys
 import time
 from dataclasses import asdict, dataclass, field
-from typing import ContextManager, Optional
+from typing import Optional
 from collections import defaultdict
+
+
+# TODO: doesn't forward SIGTERM, only SIGINT
 
 ''' GLOBALS '''
 
@@ -406,8 +410,56 @@ def check_tar():
   process = subprocess.Popen(['tar', '--version'], stdout=subprocess.PIPE)
   contents = process.stdout.read()
   process.wait()
-  logger.debug("Tar contents:\n%s", contents.decode('utf-8'))
-  assert 'GNU tar' in contents.decode('utf-8').split('\n', 1)[0], "You must have a GNU tar installed"
+  version = contents.decode('utf-8').split('\n', 1)[0]
+  logger.debug("Tar Version: %s", version)
+  assert 'GNU tar' in version, "You must have a GNU tar installed"
+
+def status_tar(rit: RitCache, verbose: bool):
+  ''' returns True if rit directory is dirty '''
+  parent_commit_id = rit.get_head_commit_id()
+  work_snar = os.path.join(rit.paths.work, 'ref.snar')
+  if parent_commit_id is not None:
+    head_snar = get_snar_path(rit, parent_commit_id)
+    shutil.copyfile(head_snar, work_snar)
+
+  check_tar()
+  tar_cmd = ['tar', '-cvg', work_snar, f'--exclude={rit_dir_name}', '-f', os.devnull, '.']
+  logger.debug("Running tar command: %s", tar_cmd)
+
+  process = subprocess.Popen(tar_cmd, cwd=rit.paths.root, stdout=subprocess.PIPE)
+  terminated = False
+  dirty = False
+  while True:
+    line = process.stdout.readline()
+    if not line:
+      break
+
+    if line == b'./\n':
+      continue
+
+    dirty = True
+    if verbose:
+      output = line.decode('utf-8').strip()
+      logger.info("\t- %s", colorize(fg + red, output))
+    else:
+      terminated = True
+      try:
+        process.terminate()
+      except Exception:
+        pass
+      break
+
+  # still need to read the stdout to prevent blocking and therefore deadlock
+  if terminated:
+    while process.stdout.read(DEFAULT_BUFFER_SIZE):
+      pass
+
+  exit_code = process.wait()
+  if not terminated and exit_code != 0:
+    raise RitError("Creating commit's tar failed with exit code: %d", exit_code)
+
+  os.remove(work_snar)
+  return dirty
 
 def create_commit(rit: RitCache, create_time: float, msg: str):
   head = rit.head
@@ -415,10 +467,10 @@ def create_commit(rit: RitCache, create_time: float, msg: str):
   logger.debug("Parent ref: %s", parent_commit_id)
 
   work_tar = os.path.join(rit.paths.work, 'ref.tar')
-  logger.debug("Creating tar: %s", work_tar)
+  logger.debug("Working tar: %s", work_tar)
 
   work_snar = os.path.join(rit.paths.work, 'ref.snar')
-  logger.debug("Creating snar: %s", work_snar)
+  logger.debug("Working snar: %s", work_snar)
 
   if parent_commit_id is not None:
     head_snar = get_snar_path(rit, parent_commit_id)
@@ -428,9 +480,13 @@ def create_commit(rit: RitCache, create_time: float, msg: str):
     logger.debug("Using fresh snar file since no parent commit")
 
   check_tar()
-  tar_cmd = ['tar', '-cg', work_snar, f'--exclude={rit_dir_name}', '-f', work_tar, rit.paths.root]
+  opts = '-cz'
+  if logger.getEffectiveLevel() <= logging.DEBUG:
+    opts += 'v'
+  opts += 'g'
+  tar_cmd = ['tar', opts, work_snar, f'--exclude={rit_dir_name}', '-f', work_tar, '.']
   logger.debug("Running tar command: %s", tar_cmd)
-  process = subprocess.Popen(tar_cmd)
+  process = subprocess.Popen(tar_cmd, cwd=rit.paths.root)
   # TODO: doesn't forward SIGTERM, only SIGINT
   exit_code = process.wait()
   if exit_code != 0:
@@ -459,9 +515,29 @@ def create_commit(rit: RitCache, create_time: float, msg: str):
 
 ''' RESET HELPERS '''
 
-def reset(rit: RitCache, commit_id: str):
-  logger.debug('resetting to %s', commit_id)
+def apply_commit(rit: RitCache, commit: Commit):
+  logger.info("Applying commit: %s", commit.commit_id)
+  tar_file = get_tar_path(rit, commit.commit_id)
+  tar_cmd = ['tar', '-xg', os.devnull, '-f', tar_file]
+  process = subprocess.Popen(tar_cmd, cwd=rit.paths.root)
+  exit_code = process.wait()
+  if exit_code != 0:
+    raise RitError("Failed while trying to apply commit: %s", commit.commit_id)
 
+def reset(rit: RitCache, commit: Commit, force: bool):
+  logger.debug('resetting to %s', commit.commit_id)
+
+  if status_tar(rit, False) and not force:
+    raise RitError("Uncommitted changes! Commit them or use -f to destroy them.")
+
+  commit_chain = [commit]
+  while commit.parent_commit_id is not None:
+    commit = rit.get_commit(commit.parent_commit_id, ensure=True)
+    commit_chain.append(commit)
+  commit_chain.reverse()
+
+  for commit in commit_chain:
+    apply_commit(rit, commit)
 
 ''' BRANCH HELPERS '''
 
@@ -502,6 +578,7 @@ class ResolvedRef:
   '''
 
 def resolve_commit(rit: RitCache, partial_commit_id: str):
+  logger.debug("Resolving commit: %s", partial_commit_id)
   commit = rit.get_commit(partial_commit_id)
   if commit is not None:
     return commit
@@ -518,9 +595,10 @@ def resolve_commit(rit: RitCache, partial_commit_id: str):
       if commit is not None:
         raise RitError("Reference %s matched commits %s and %s", partial_commit_id, commit.commit_id, commit_id)
       commit = rit.get_commit(commit_id, ensure=True)
-  return None
+  return commit
 
 def resolve_ref(rit: RitCache, ref: Optional[str]):
+  logger.debug("Resolving ref: %s", ref)
   res = ResolvedRef()
   if ref is None or ref == head_ref_name:
     head = rit.head
@@ -542,7 +620,9 @@ def resolve_ref(rit: RitCache, ref: Optional[str]):
 
 branch_name_re = re.compile('^\\w+$')
 def validate_branch_name(name: str):
-  if branch_name_re.search(name) is None:
+  if name == head_ref_name:
+    raise RitError("Branch can't be named the same as the head ref: %s", name)
+  elif branch_name_re.search(name) is None:
     raise RitError("Invalid branch name: %s", name)
 
 def pprint_dur(dur: int, name: str):
@@ -661,6 +741,55 @@ def create_branch(rit: RitCache, name: str, ref: Optional[str], force: bool):
   rit.set_branch(branch)
   logger.info("Created branch %s at %s", name, commit_id[:short_hash_index])
 
+def log_refs(rit: RitCache, refs: list[str], all: bool, full: bool):
+  commits = []
+
+  if not refs:
+    refs.append(None)
+  if all:
+    refs.extend(rit.get_branch_names())
+  for ref in refs:
+    res = resolve_ref(rit, ref)
+    if res.commit is None:
+      if res.head is not None:
+        raise RitError("head branch doesn't have any commits")
+      else:
+        raise RitError("Unable to locate ref: %s", ref)
+    commits.append(res.commit)
+
+  log_commit(rit, commits)
+
+def show_ref(rit: RitCache, ref: Optional[str]):
+  res = resolve_ref(rit, ref)
+  if res.commit is None:
+    if res.head is not None:
+      raise RitError("head branch doesn't have any commits to show")
+    else:
+      raise RitError("Unable to locate ref: %s", ref)
+
+  tar_file = get_tar_path(rit, res.commit.commit_id)
+  tar_cmd = ['tar', '-tf', tar_file]
+  process = subprocess.Popen(tar_cmd, stdout=subprocess.PIPE)
+  while True:
+    line = process.stdout.readline()
+    if not line:
+      break
+    elif line == b'./\n':
+      continue
+    output = line.decode('utf-8').strip()
+    logger.info("\t- %s", colorize(fg + cyan, output))
+  results = process.wait()
+  if results != 0:
+    logger.error("tar command failed with exit code %d", results)
+
+def status_head(rit: RitCache):
+  if rit.head.branch_name is not None:
+    head_id = rit.head.branch_name
+  else:
+    head_id = rit.head.commit_id
+  logger.info("HEAD -> %s", head_id)
+  if not status_tar(rit, True):
+    logger.info("Clean working directory!")
 
 ''' API '''
 
@@ -702,16 +831,21 @@ def checkout(*, ref: str, force: bool):
     raise RitError("Attempted to checkout head ref")
   elif res.commit is None:
     raise RitError("Unable to resolve ref to commit: %s", ref)
-  commit_id = res.commit.commit_id
-  reset(rit, commit_id)
+  commit = res.commit
+
+  head_commit_id = rit.get_head_commit_id()
+  if head_commit_id is not None and head_commit_id != commit.commit_id:
+    reset(rit, commit, force)
   head = copy.copy(rit.head)
   if res.branch is not None:
     head.branch_name = res.branch.name
     head.commit_id = None
   else:
     head.branch_name = None
-    head.commit_id = commit_id
+    head.commit_id = commit.commit_id
   rit.set_head(head)
+
+  logger.info("Successful checkout. Commit this checkout to get a clean rit status.")
 
 def branch(*, name: Optional[str], ref: Optional[str], force: bool, delete: bool):
   '''
@@ -721,7 +855,7 @@ def branch(*, name: Optional[str], ref: Optional[str], force: bool, delete: bool
   logger.debug('  name: %s', name)
   logger.debug('  ref: %s', ref)
   logger.debug('  force: %s', force)
-  logger.debug('  delete: %s', force)
+  logger.debug('  delete: %s', delete)
   check_types(
     name = (name, optional_t(exact_t(str))),
     ref = (ref, optional_t(exact_t(str))),
@@ -730,6 +864,11 @@ def branch(*, name: Optional[str], ref: Optional[str], force: bool, delete: bool
   )
 
   rit = RitCache()
+
+  if name is not None:
+    validate_branch_name(name)
+    if rit.head.branch_name is not None and rit.head.branch_name == name:
+      raise RitError("Unable to set commit of head branch.")
 
   if delete:
     if force:
@@ -751,8 +890,6 @@ def branch(*, name: Optional[str], ref: Optional[str], force: bool, delete: bool
     return list_branches(rit)
 
   else:
-    validate_branch_name(name)
-
     return create_branch(rit, name, ref, force)
 
 def log(*, refs: list[str], all: bool, full: bool):
@@ -768,23 +905,19 @@ def log(*, refs: list[str], all: bool, full: bool):
   rit = RitCache()
   log_refs(rit, refs, all, full)
 
-def log_refs(rit: RitCache, refs: list[str], all: bool, full: bool):
-  commits = []
+def show(*, ref: Optional[str]):
+  logger.debug('show')
+  logger.debug('  ref: %s', ref)
+  check_types(ref = (ref, optional_t(exact_t(str))))
 
-  if not refs:
-    refs.append(None)
-  if all:
-    refs.extend(rit.get_branch_names())
-  for ref in refs:
-    res = resolve_ref(rit, ref)
-    if res.commit is None:
-      if res.head is not None:
-        raise RitError("head branch doesn't have any commits")
-      else:
-        raise RitError("Unable to locate ref: %s", ref)
-    commits.append(res.commit)
+  rit = RitCache()
+  show_ref(rit, ref)
 
-  log_commit(rit, commits)
+def status():
+  logger.debug('status')
+
+  rit = RitCache()
+  status_head(rit)
 
 def reflog():
   logger.debug('reflog')
@@ -836,6 +969,17 @@ def branch_main(argv, prog):
   args = parser.parse_args(argv)
   return branch(**vars(args))
 
+def show_main(argv, prog):
+  parser = argparse.ArgumentParser(description="Show contents of a commit", prog=prog)
+  parser.add_argument('ref', nargs='?', help="The ref to show commit contents of. By default, head.")
+  args = parser.parse_args(argv)
+  return show(**vars(args))
+
+def status_main(argv, prog):
+  parser = argparse.ArgumentParser(description="Show the current directory's diff state.", prog=prog)
+  args = parser.parse_args(argv)
+  return status(**vars(args))
+
 def log_main(argv, prog):
   parser = argparse.ArgumentParser(description="Log the current commit history", prog=prog)
   parser.add_argument('refs', nargs='*', help="The refs to log. By default, the current head is used.")
@@ -849,6 +993,8 @@ command_handlers = dict(
   commit = commit_main,
   checkout = checkout_main,
   branch = branch_main,
+  show = show_main,
+  status = status_main,
   log = log_main,
 )
 
