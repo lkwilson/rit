@@ -61,10 +61,14 @@ python "$rit_bin" "$@" checkout first -f || bad
 python "$rit_bin" "$@" log || bad
 python "$rit_bin" "$@" log main || bad
 python "$rit_bin" "$@" log --all || bad
-python "$rit_bin" "$@" checkout main || bad
+python "$rit_bin" "$@" checkout main -f || bad
 python "$rit_bin" "$@" log || bad
 python "$rit_bin" "$@" show || bad
 python "$rit_bin" "$@" status || bad
+python "$rit_bin" "$@" commit "post checkout commit" || bad
+python "$rit_bin" "$@" show || bad
+python "$rit_bin" "$@" status || bad
+
 
 set +x
 
