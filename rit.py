@@ -798,12 +798,9 @@ def init():
   try:
     paths = RitPaths.build_rit_paths(os.getcwd(), init=True)
     logger.info("Successfully created rit directory: %s", paths.rit_dir)
-    return 0
-
   except FileExistsError:
     paths = RitPaths.build_rit_paths(os.getcwd())
-    logger.error("The rit directory already exists: %s", paths.rit_dir)
-    return 1
+    raise RitError("The rit directory already exists: %s", paths.rit_dir)
 
 def commit(*, msg: str):
   logger.debug('commit')
@@ -887,10 +884,10 @@ def branch(*, name: Optional[str], ref: Optional[str], force: bool, delete: bool
     elif ref is not None:
       raise RitError("You cannot specify a ref branch while listing branches")
 
-    return list_branches(rit)
+    list_branches(rit)
 
   else:
-    return create_branch(rit, name, ref, force)
+    create_branch(rit, name, ref, force)
 
 def log(*, refs: list[str], all: bool, full: bool):
   logger.debug('log')
@@ -945,20 +942,20 @@ def reroot():
 def init_main(argv, prog):
   parser = argparse.ArgumentParser(description="Initialize a raw backup directory", prog=prog)
   args = parser.parse_args(argv)
-  return init(**vars(args))
+  init(**vars(args))
 
 def commit_main(argv, prog):
   parser = argparse.ArgumentParser(description="Create a commit from the current state", prog=prog)
   parser.add_argument('msg', help="The commit msg")
   args = parser.parse_args(argv)
-  return commit(**vars(args))
+  commit(**vars(args))
 
 def checkout_main(argv, prog):
   parser = argparse.ArgumentParser(description="Log the current commit history", prog=prog)
   parser.add_argument('ref', help="The ref to checkout")
   parser.add_argument('-f', '--force', action='store_true', help="If there are uncommitted changes, automatically remove them.")
   args = parser.parse_args(argv)
-  return checkout(**vars(args))
+  checkout(**vars(args))
 
 def branch_main(argv, prog):
   parser = argparse.ArgumentParser(description="Create a new branch", prog=prog)
@@ -967,18 +964,18 @@ def branch_main(argv, prog):
   parser.add_argument('-f', '--force', action='store_true', help="The head of the new branch. By default, the current commit is used.")
   parser.add_argument('-d', '--delete', action='store_true', help="Delete the specified branch.")
   args = parser.parse_args(argv)
-  return branch(**vars(args))
+  branch(**vars(args))
 
 def show_main(argv, prog):
   parser = argparse.ArgumentParser(description="Show contents of a commit", prog=prog)
   parser.add_argument('ref', nargs='?', help="The ref to show commit contents of. By default, head.")
   args = parser.parse_args(argv)
-  return show(**vars(args))
+  show(**vars(args))
 
 def status_main(argv, prog):
   parser = argparse.ArgumentParser(description="Show the current directory's diff state.", prog=prog)
   args = parser.parse_args(argv)
-  return status(**vars(args))
+  status(**vars(args))
 
 def log_main(argv, prog):
   parser = argparse.ArgumentParser(description="Log the current commit history", prog=prog)
@@ -986,7 +983,7 @@ def log_main(argv, prog):
   parser.add_argument('--all', action='store_true', help="Include all branches")
   parser.add_argument('--full', action='store_true', help="Include more log data")
   args = parser.parse_args(argv)
-  return log(**vars(args))
+  log(**vars(args))
 
 command_handlers = dict(
   init = init_main,
@@ -1028,7 +1025,8 @@ def main(argv):
   logger.debug("Extra args: %s", sub_argv)
   setup_logger(args.verbose - args.quiet)
   try:
-    return command_handlers[args.command](sub_argv, prog=f'{parser.prog} {args.command}')
+    command_handlers[args.command](sub_argv, prog=f'{parser.prog} {args.command}')
+    return 0
   except RitError as exc:
     logger.error(exc.msg, *exc.args)
     return 1
