@@ -92,5 +92,5 @@ python "$rit_bin" "$@" checkout base -f || bad
 
 set +x
 
-echo "Success!"
+echo "All tests succeeded!"
 exit 0
