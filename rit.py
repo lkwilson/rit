@@ -18,8 +18,6 @@ from typing import Optional
 from collections import defaultdict
 
 
-# TODO: doesn't forward SIGTERM, only SIGINT
-
 ''' GLOBALS '''
 
 logger = logging.getLogger(__name__)
@@ -122,7 +120,7 @@ class HeadNode:
       branch_name = optional_t(exact_t(str)),
     ))
     if (self.commit_id is None) == (self.branch_name is None):
-      raise TypeError("HEAD must be a branch name or a commit id")
+      raise TypeError(head_ref_name + " must be a branch name or a commit id")
 
 class RitError(Exception):
   def __init__(self, msg, *args):
@@ -662,9 +660,16 @@ def pprint_time_duration(start: float, end: float):
 
 ''' SUB LOG COMMANDS '''
 
-def log_commit(rit: RitCache, commits: list[Commit]):
-  leafs = set()
-  commit_graph = {}
+def log_commits(rit: RitCache, commits: list[Commit]):
+  '''
+  Returns tuple of the following:
+  - commit_graph: a tree containing all provided commits
+  - leafs: the set of leaf notes of the tree
+  - commit_id_to_commit: a map of each commit to a full Commit object
+  - commit_id_to_branch_names: a map of each commit_id to branch names, including the head_ref_name
+  '''
+  leafs: set[str] = set()
+  commit_graph: dict[str, str] = {}
   for commit in commits:
     if commit.commit_id not in commit_graph:
       leafs.add(commit.commit_id)
@@ -680,10 +685,13 @@ def log_commit(rit: RitCache, commits: list[Commit]):
 
   now = time.time()
   commit_id_to_branch_names = rit.get_commit_id_to_branch_names()
+  commit_id_to_commit: dict[str, Commit] = {}
   for commit_id in leafs:
     logger.info("Log branch from %s", commit_id[:short_hash_index])
     while commit_id is not None:
-      commit = rit.get_commit(commit_id, ensure=True)
+      if commit_id not in commit_id_to_commit:
+        commit_id_to_commit[commit_id] = rit.get_commit(commit_id, ensure=True)
+      commit = commit_id_to_commit[commit_id]
 
       colored_commit_id = colorize(fg + yellow, commit.commit_id[:short_hash_index])
 
@@ -704,26 +712,28 @@ def log_commit(rit: RitCache, commits: list[Commit]):
 
       logger.info("* %s %s%s%s", colored_commit_id, date_details, branch_details, commit.msg)
       commit_id = commit_graph[commit_id]
+  return commit_graph, leafs, commit_id_to_commit, commit_id_to_branch_names
 
 ''' SUB BRANCH COMMANDS '''
 
 def delete_branch(rit: RitCache, name: str):
   try:
     os.remove(os.path.join(rit.paths.branches, name))
-    return True
   except FileNotFoundError:
-    return False
-
+    raise RitError("Failed to remove branch since it didn't exist.")
 
 def list_branches(rit: RitCache):
   head = rit.head
-  for branch_name in rit.get_branch_names():
-    this_sym = '*' if branch_name == head.branch_name else ' '
+  head_branch_name = head.branch_name
+  branch_names = rit.get_branch_names()
+  for branch_name in branch_names:
+    this_sym = '*' if branch_name == head_branch_name else ' '
     branch = rit.get_branch(branch_name, ensure=True)
     commit = rit.get_commit(branch.commit_id, ensure=True)
     colored_commit_id = colorize(fg + yellow, branch.commit_id[:short_hash_index])
     colored_branch_name = colorize(fg + green, branch_name)
     logger.info("%s %s\t%s %s", this_sym, colored_branch_name, colored_commit_id, commit.msg)
+  return head_branch_name, branch_names
 
 def create_branch(rit: RitCache, name: str, ref: Optional[str], force: bool):
   if rit.is_branch(name) and not force:
@@ -740,8 +750,13 @@ def create_branch(rit: RitCache, name: str, ref: Optional[str], force: bool):
   branch = Branch(name, commit_id)
   rit.set_branch(branch)
   logger.info("Created branch %s at %s", name, commit_id[:short_hash_index])
+  return res
 
 def log_refs(rit: RitCache, refs: list[str], all: bool, full: bool):
+  '''
+  Returns the commit tree containing the given refs. If none are given, assumes
+  head. If all is true, appends refs.
+  '''
   commits = []
 
   if not refs:
@@ -757,7 +772,7 @@ def log_refs(rit: RitCache, refs: list[str], all: bool, full: bool):
         raise RitError("Unable to locate ref: %s", ref)
     commits.append(res.commit)
 
-  log_commit(rit, commits)
+  return log_commits(rit, commits)
 
 def show_ref(rit: RitCache, ref: Optional[str]):
   res = resolve_ref(rit, ref)
@@ -770,6 +785,7 @@ def show_ref(rit: RitCache, ref: Optional[str]):
   tar_file = get_tar_path(rit, res.commit.commit_id)
   tar_cmd = ['tar', '-tf', tar_file]
   process = subprocess.Popen(tar_cmd, stdout=subprocess.PIPE)
+  changes = []
   while True:
     line = process.stdout.readline()
     if not line:
@@ -777,17 +793,19 @@ def show_ref(rit: RitCache, ref: Optional[str]):
     elif line == b'./\n':
       continue
     output = line.decode('utf-8').strip()
+    changes.append(output)
     logger.info("\t- %s", colorize(fg + cyan, output))
   results = process.wait()
   if results != 0:
-    logger.error("tar command failed with exit code %d", results)
+    raise RitError("tar command failed with exit code %d", results)
+  return res, changes
 
 def status_head(rit: RitCache):
   if rit.head.branch_name is not None:
     head_id = rit.head.branch_name
   else:
     head_id = rit.head.commit_id
-  logger.info("HEAD -> %s", head_id)
+  logger.info("%s -> %s", head_ref_name, head_id)
   if not status_tar(rit, True):
     logger.info("Clean working directory!")
 
@@ -812,8 +830,14 @@ def commit(*, msg: str):
   rit = RitCache()
   commit = create_commit(rit, time.time(), msg)
   logger.info("Created commit %s: %s", commit.commit_id[:short_hash_index], commit.msg)
+  return commit
 
 def checkout(*, ref: str, force: bool):
+  '''
+  Checkout ref (overwriting any changes if force is True).
+
+  Returns ref resolved, as a ResolvedRef.
+  '''
   logger.debug('checkout')
   logger.debug('  ref: %s', ref)
   logger.debug('  force: %s', force)
@@ -843,10 +867,14 @@ def checkout(*, ref: str, force: bool):
   rit.set_head(head)
 
   logger.info("Successful checkout. Commit this checkout to get a clean rit status.")
+  return res
 
 def branch(*, name: Optional[str], ref: Optional[str], force: bool, delete: bool):
   '''
   ref is a ref name or commit id or head_ref_name
+
+  If creating a branch, returns ref resolved, as ResolvedRef.
+  If listing all branches, returns (current_branch_name: str, all_branch_names: list[str])
   '''
   logger.debug('branch')
   logger.debug('  name: %s', name)
@@ -875,8 +903,7 @@ def branch(*, name: Optional[str], ref: Optional[str], force: bool, delete: bool
     elif ref is not None:
       raise RitError("You can't specify a reference branch with the delete option")
 
-    if not delete_branch(rit, name):
-      raise RitError("Failed to remove branch since it didn't exist.")
+    delete_branch(rit, name)
 
   elif name is None:
     if force:
@@ -884,10 +911,10 @@ def branch(*, name: Optional[str], ref: Optional[str], force: bool, delete: bool
     elif ref is not None:
       raise RitError("You cannot specify a ref branch while listing branches")
 
-    list_branches(rit)
+    return list_branches(rit)
 
   else:
-    create_branch(rit, name, ref, force)
+    return create_branch(rit, name, ref, force)
 
 def log(*, refs: list[str], all: bool, full: bool):
   logger.debug('log')
@@ -900,7 +927,7 @@ def log(*, refs: list[str], all: bool, full: bool):
   )
 
   rit = RitCache()
-  log_refs(rit, refs, all, full)
+  return log_refs(rit, refs, all, full)
 
 def show(*, ref: Optional[str]):
   logger.debug('show')
@@ -908,7 +935,7 @@ def show(*, ref: Optional[str]):
   check_types(ref = (ref, optional_t(exact_t(str))))
 
   rit = RitCache()
-  show_ref(rit, ref)
+  return show_ref(rit, ref)
 
 def status():
   logger.debug('status')
