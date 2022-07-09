@@ -10,15 +10,19 @@ set -e
 
 rit_bin=../rit.py
 
+
 cd "$(dirname "$(realpath "$BASH_SOURCE")")"
-rm -rf rit_test_dir
-mkdir rit_test_dir
-cd rit_test_dir
 
+export TEST_ROOT_RIT_DIR=rit_test_dir
+rm -rf "$TEST_ROOT_RIT_DIR"
+mkdir "$TEST_ROOT_RIT_DIR"
+nosetests
 
+rm -rf "$TEST_ROOT_RIT_DIR"
+mkdir "$TEST_ROOT_RIT_DIR"
+cd "$TEST_ROOT_RIT_DIR"
 
 set -x
-nosetests
 python "$rit_bin" "$@" init || bad
 python "$rit_bin" "$@" init && bad
 python "$rit_bin" "$@" branch first && bad
