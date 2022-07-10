@@ -787,6 +787,23 @@ def log_refs(rit: RitResource, refs: list[str], all: bool, full: bool):
 
   return log_commits(rit, commits)
 
+def info_refs(rit: RitResource, refs: list[str], all: bool):
+  '''
+  Returns information regarding the provided refs
+  '''
+  resolved_refs: list[ResolvedRef] = []
+
+  if not refs:
+    refs.append(None)
+  if all:
+    refs.extend(rit.get_branch_names())
+  for ref in refs:
+    res = resolve_ref(rit, ref)
+    resolved_refs.append(res)
+
+  commit_id_to_branch_names = rit.get_commit_id_to_branch_names()
+  return resolved_refs, commit_id_to_branch_names
+
 def show_ref(rit: RitResource, ref: Optional[str]):
   res = resolve_ref(rit, ref)
   if res.commit is None:
@@ -933,6 +950,7 @@ def log(*, root_rit_dir: str, refs: list[str], all: bool, full: bool):
   check_types(
     refs = (refs, list_t(exact_t(str))),
     all = (all, exact_t(bool)),
+    full = (full, exact_t(bool)),
   )
 
   rit = RitResource(root_rit_dir)
@@ -972,6 +990,19 @@ def reroot(*, root_rit_dir: str):
   rit = RitResource(root_rit_dir)
   raise NotImplementedError()
 
+''' PYTHON ONLY API '''
+
+def info(*, root_rit_dir: str, refs: list[str], all: bool):
+  logger.debug('info')
+  logger.debug('  refs: %s', refs)
+  logger.debug('  all: %s', all)
+  check_types(
+    refs = (refs, list_t(exact_t(str))),
+    all = (all, exact_t(bool)),
+  )
+
+  rit = RitResource(root_rit_dir)
+  return info_refs(rit, refs, all)
 
 ''' ARG HANDLERS '''
 

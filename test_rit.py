@@ -2,7 +2,7 @@ import os
 import rit
 
 # public api
-from rit import init, commit, checkout, branch, log, show, status, reflog, prune, reroot
+from rit import init, commit, checkout, branch, log, show, status, reflog, prune, reroot, info
 
 def test_pprint_time_duration():
   min = 60
@@ -219,3 +219,46 @@ def test_python_api():
   assert commit_graph[head_commit_id] == second_commit.commit_id
   assert deviate_commit_id in commit_id_to_commit
   assert head_commit_id in commit_id_to_commit
+
+  refs, commit_id_to_branch_names = info(**base_kwargs, refs=[], all=False)
+  assert len(refs) == 1
+  assert refs[0].head is not None
+
+  refs, commit_id_to_branch_names = info(**base_kwargs, refs=[rit.head_ref_name], all=False)
+  assert len(refs) == 1
+  assert refs[0].head is not None
+
+  refs, commit_id_to_branch_names = info(**base_kwargs, refs=[rit.head_ref_name], all=True)
+  assert len(refs) == 7
+  assert refs[0].head is not None
+
+  refs, commit_id_to_branch_names = info(**base_kwargs, refs=[], all=True)
+  assert len(refs) == 7
+  assert refs[0].head is not None
+
+  refs, commit_id_to_branch_names = info(**base_kwargs, refs=['first_b'], all=True)
+  assert len(refs) == 7
+  assert refs[0].head is None
+  assert refs[0].branch.name == 'first_b'
+  assert refs[0].commit.commit_id == first_commit.commit_id
+
+  refs, commit_id_to_branch_names = info(**base_kwargs, refs=['first_b', 'third_b'], all=True)
+  assert len(refs) == 8
+  assert refs[0].head is None
+  assert refs[0].branch.name == 'first_b'
+  assert refs[0].commit.commit_id == first_commit.commit_id
+  assert refs[1].head is None
+  assert refs[1].branch.name == 'third_b'
+  assert refs[1].commit.commit_id == third_commit.commit_id
+
+  for ref in refs:
+    if ref.branch is not None:
+      assert ref.commit.commit_id in commit_id_to_branch_names
+    else:
+      assert ref.commit.commit_id not in commit_id_to_branch_names
+
+  refs, commit_id_to_branch_names = info(**base_kwargs, refs=['first_b'], all=False)
+  assert len(refs) == 1
+  assert refs[0].head is None
+  assert refs[0].branch.name == 'first_b'
+  assert refs[0].commit.commit_id == first_commit.commit_id
