@@ -18,8 +18,6 @@ from typing import Optional
 from collections import defaultdict
 
 
-# TODO: doesn't forward SIGTERM, only SIGINT
-
 ''' GLOBALS '''
 
 logger = logging.getLogger(__name__)
@@ -35,6 +33,8 @@ black, red, green, yellow, blue, magenta, cyan, white = range(8)
 
 @dataclass
 class RitPaths:
+  ''' a class that represents the various directories used by rit '''
+
   root: str
   ''' The directory to backup is stored here '''
 
@@ -59,6 +59,10 @@ class RitPaths:
 
   @staticmethod
   def build_rit_paths(root: str, init: bool = False):
+    '''
+    Given a root rit directory, construct a rit paths object and ensure rit
+    subdirectories exist. If init is True, the root rit path will be created.
+    '''
     root = os.path.realpath(root)
     rit_dir = os.path.join(root, rit_dir_name)
     if init:
@@ -82,10 +86,19 @@ class RitPaths:
 
 @dataclass
 class Commit:
+  ''' represents a single commit '''
+
   parent_commit_id: Optional[str]
+  ''' the commit id of parent, if any '''
+
   commit_id: str
+  ''' the current commit's commit id '''
+
   create_time: float
+  ''' the creation time of commit in seconds since posix '''
+
   msg: str
+  ''' the commit msg'''
 
   def __post_init__(self):
     check_obj_types(self, dict(
@@ -97,8 +110,13 @@ class Commit:
 
 @dataclass
 class Branch:
+  ''' represents a branch '''
+
   name: str
+  ''' the branch name '''
+
   commit_id: str
+  ''' the commit id tied to the branch '''
 
   info: str = ''
   '''
@@ -113,8 +131,19 @@ class Branch:
 
 @dataclass
 class HeadNode:
+  '''
+  the rit directory's current location
+
+  head is either a commit or a branch, but not both
+
+  it is possible for the branch_name to not have a commit
+  '''
+
   commit_id: Optional[str] = None
+  ''' the current dir is based off of this commit id, if any '''
+
   branch_name: Optional[str] = None
+  ''' the current head is tied to this branch. new commits move the branch. '''
 
   def __post_init__(self):
     check_obj_types(self, dict(
@@ -122,66 +151,129 @@ class HeadNode:
       branch_name = optional_t(exact_t(str)),
     ))
     if (self.commit_id is None) == (self.branch_name is None):
-      raise TypeError("HEAD must be a branch name or a commit id")
+      raise TypeError(head_ref_name + " must be a branch name or a commit id")
 
 class RitError(Exception):
+  '''
+  an error raised by rit
+
+  how to render:
+    error_msg = exc.msg % exc.args
+    logger.error(exc.msg, *exc.args)
+  '''
+
   def __init__(self, msg, *args):
     super(RitError, self).__init__()
     self.msg = msg
     self.args = args
 
 @dataclass
-class RitCache:
-  _paths: RitPaths = None
-  _head: HeadNode = None
-  _commits: dict[str, Commit] = field(default_factory=dict)
-  _branches: dict[str, Branch] = field(default_factory=dict)
-  _branch_name_to_commit_ids: dict[str, str] = None
-  _commit_id_to_branch_names: dict[str, list[str]] = None
-  _branch_names: list[str] = None
-  _commit_ids: list[str] = None
-  _short_commit_tree: dict[str, list[str]] = None
+class RitResource:
+  '''
+  a resource to query the rit directory and cache results
 
-  def clear(self):
+  All interactions with the rit directory should go through this object.
+
+  Any external changes to the rit directory invalidate's this object's cache and
+  in that case, _clear should be called. However, no user of this resource
+  should be calling _clear. Instead this class' api should be extended and that
+  new method should call _clear.
+  '''
+
+  root_rit_dir: str
+  ''' the root rit directory '''
+
+  _paths: RitPaths = None
+  ''' cache for paths property '''
+
+  _head: HeadNode = None
+  ''' cache for head property '''
+
+  _commits: dict[str, Commit] = field(default_factory=dict)
+  ''' cache for get_commit '''
+
+  _branches: dict[str, Branch] = field(default_factory=dict)
+  ''' cache for get_branch '''
+
+  _branch_name_to_commit_ids: dict[str, str] = None
+  ''' cache for get_branch_name_to_commit_ids '''
+
+  _commit_id_to_branch_names: dict[str, list[str]] = None
+  ''' cache for get_commit_id_to_branch_names '''
+
+  _branch_names: list[str] = None
+  ''' cache for get_branch_names '''
+
+  _commit_ids: list[str] = None
+  ''' cache for get_commit_ids '''
+
+  _short_commit_tree: dict[str, list[str]] = None
+  ''' cache for get_commit_tree '''
+
+  def __post_init__(self) -> None:
+    check_obj_types(self, dict(
+      root_rit_dir = exact_t(str),
+    ))
+
+  def initialize(self):
+    '''
+    creates the rit directory
+
+    if already initialized, raise RitError
+    '''
+    try:
+      paths = RitPaths.build_rit_paths(self.root_rit_dir, init=True)
+      logger.info("Successfully created rit directory: %s", paths.rit_dir)
+    except FileExistsError:
+      raise RitError("The rit directory already exists: %s", self.paths.rit_dir)
+
+  def _clear(self):
     ''' If the rit directory is modified, then the cache must be cleared '''
-    self._head = None
-    self._commits = {}
-    self._branches = {}
-    self._branch_name_to_commit_ids = None
-    self._commit_id_to_branch_names = None
-    self._branch_names = None
-    self._commit_ids = None
-    self._short_commit_tree = None
+    cleared_rit = RitResource(self.root_rit_dir)
+    self._head = cleared_rit._head
+    self._commits = cleared_rit._commits
+    self._branches = cleared_rit._branches
+    self._branch_name_to_commit_ids = cleared_rit._branch_name_to_commit_ids
+    self._commit_id_to_branch_names = cleared_rit._commit_id_to_branch_names
+    self._branch_names = cleared_rit._branch_names
+    self._commit_ids = cleared_rit._commit_ids
+    self._short_commit_tree = cleared_rit._short_commit_tree
 
   ''' SET '''
 
-  def set_commit(self, commit: Commit):
+  def add_commit(self, commit: Commit):
+    ''' add the commit to the rit dir '''
     self._write_commit(commit)
-    self.clear()
+    self._clear()
 
   def set_branch(self, branch: Branch):
+    ''' add the branch to the rit dir '''
     self._write_branch(branch)
-    self.clear()
+    self._clear()
 
   def set_head(self, head: HeadNode):
+    ''' set the new head point '''
     self._write_head(head)
-    self._head = None
+    self._clear()
 
   ''' GET '''
 
   @property
   def paths(self):
+    ''' returns a RitPaths object for this rit directory '''
     if self._paths is None:
       self._paths = self._read_paths()
     return self._paths
 
   @property
   def head(self):
+    ''' returns the HeadNode object for this rit directory '''
     if self._head is None:
       self._head = self._read_head()
     return self._head
 
   def get_head_commit_id(self):
+    ''' get the commit id of the head, None if there isn't one '''
     head = self.head
     if head.commit_id is not None:
       return head.commit_id
@@ -193,11 +285,19 @@ class RitCache:
         return None
 
   def get_commit_ids(self):
+    ''' get all commit ids '''
     if self._commit_ids is None:
       self._commit_ids = self._read_commit_ids()
     return self._commit_ids
 
   def get_commit(self, commit_id: str, *, ensure=False):
+    '''
+    get commit object of a commit id
+
+    return a commit if found
+
+    otherwise return None, if ensure is set to True, the raise instead of return None.
+    '''
     if commit_id not in self._commits:
       try:
         self._commits[commit_id] = self._read_commit(commit_id)
@@ -208,14 +308,21 @@ class RitCache:
     return self._commits[commit_id]
 
   def is_commit(self, commit_id: str):
+    ''' return True if commit_id has a commit '''
     return self.get_commit(commit_id) is not None
 
   def get_branch_names(self):
+    ''' return names of all branches '''
     if self._branch_names is None:
       self._branch_names = self._read_branch_names()
     return self._branch_names
 
   def get_branch(self, name: str, *, ensure=False):
+    '''
+    query for branch by name
+
+    returns None if not found. raises RitError instead if ensure is True
+    '''
     if name not in self._branches:
       try:
         self._branches[name] = self._read_branch(name)
@@ -226,9 +333,45 @@ class RitCache:
     return self._branches[name]
 
   def is_branch(self, name: str):
+    ''' return True if the branch name has a branch '''
     return self.get_branch(name) is not None
 
-  def populate_commit_to_branch_map(self):
+  def get_branch_name_to_commit_ids(self):
+    ''' see _populate_commit_to_branch_map '''
+    if self._branch_name_to_commit_ids is None:
+      self._populate_commit_to_branch_map()
+    return self._branch_name_to_commit_ids
+
+  def get_commit_id_to_branch_names(self):
+    ''' see _populate_commit_to_branch_map '''
+    if self._commit_id_to_branch_names is None:
+      self._populate_commit_to_branch_map()
+    return self._commit_id_to_branch_names
+
+  def get_commit_tree(self):
+    '''
+    returns a map of shortened commit prefixes to a list of all commit ids with
+    that prefix
+
+    the tree is used to find full commit ids given partial ones.
+    '''
+    if self._short_commit_tree is None:
+      self._short_commit_tree = defaultdict(list)
+      for commit_id in self.get_commit_ids():
+        self._short_commit_tree[commit_id[:short_hash_index]].append(commit_id)
+    return self._short_commit_tree
+
+  ''' helpers '''
+
+  def _populate_commit_to_branch_map(self):
+    '''
+    populate the commit <-> branch maps
+
+    branches include the HEAD node
+
+    if a branch doesn't have a commit, the commit and branch will not have
+    entries in the maps
+    '''
     branch_names = self.get_branch_names()
     self._branch_name_to_commit_ids = {}
     self._commit_id_to_branch_names = defaultdict(list)
@@ -242,36 +385,19 @@ class RitCache:
       self._branch_name_to_commit_ids[head_ref_name] = head_commit_id
       self._commit_id_to_branch_names[head_commit_id].append(head_ref_name)
 
-  def get_branch_name_to_commit_ids(self):
-    if self._branch_name_to_commit_ids is None:
-      self.populate_commit_to_branch_map()
-    return self._branch_name_to_commit_ids
-
-  def get_commit_id_to_branch_names(self):
-    if self._commit_id_to_branch_names is None:
-      self.populate_commit_to_branch_map()
-    return self._commit_id_to_branch_names
-
-  def get_commit_tree(self):
-    if self._short_commit_tree is None:
-      self._short_commit_tree = defaultdict(list)
-      for commit_id in self.get_commit_ids():
-        self._short_commit_tree[commit_id[:short_hash_index]].append(commit_id)
-    return self._short_commit_tree
-
   ''' IO '''
 
   def _read_paths(self):
-    cwd = os.path.realpath(os.getcwd())
-    rit_dir = os.path.join(cwd, rit_dir_name)
-    last_cwd = None
+    root_rit_dir = os.path.realpath(self.root_rit_dir)
+    rit_dir = os.path.join(root_rit_dir, rit_dir_name)
+    last_root_rit_dir = None
     while not os.path.isdir(rit_dir):
-      last_cwd = cwd
-      cwd = os.path.dirname(cwd)
-      if last_cwd == cwd:
+      last_root_rit_dir = root_rit_dir
+      root_rit_dir = os.path.dirname(root_rit_dir)
+      if last_root_rit_dir == root_rit_dir:
         raise RitError("Unable to locate rit directory")
-      rit_dir = os.path.join(cwd, rit_dir_name)
-    return RitPaths.build_rit_paths(cwd)
+      rit_dir = os.path.join(root_rit_dir, rit_dir_name)
+    return RitPaths.build_rit_paths(root_rit_dir)
 
   def _read_head(self):
     try:
@@ -376,16 +502,19 @@ def require(statement, msg, *args):
 
 ''' RIT DIR HELPERS '''
 
-def get_tar_path(rit: RitCache, commit_id: str):
+def get_tar_path(rit: RitResource, commit_id: str):
+  ''' get a commit's tar path, where the backup for that commit is '''
   return os.path.join(rit.paths.backups, commit_id + '.tar')
 
-def get_snar_path(rit: RitCache, commit_id: str):
+def get_snar_path(rit: RitResource, commit_id: str):
+  ''' get a commit's star path, where the backup's metadata for that commit is '''
   return os.path.join(rit.paths.backups, commit_id + '.snar')
 
 
 ''' COMMIT HELPERS '''
 
 def hash_commit(create_time: float, msg: str, snar: str, tar: str):
+  ''' create a commit_id from '''
   logger.debug("Calculating the hash of ref")
   ref_hash = hashlib.sha1()
 
@@ -406,6 +535,7 @@ def hash_commit(create_time: float, msg: str, snar: str, tar: str):
   return ref_hash.hexdigest()
 
 def check_tar():
+  ''' verify tar is the correct version and GNU '''
   logger.debug("Checking tar version")
   process = subprocess.Popen(['tar', '--version'], stdout=subprocess.PIPE)
   contents = process.stdout.read()
@@ -414,7 +544,7 @@ def check_tar():
   logger.debug("Tar Version: %s", version)
   assert 'GNU tar' in version, "You must have a GNU tar installed"
 
-def status_tar(rit: RitCache, verbose: bool):
+def status_tar(rit: RitResource, verbose: bool):
   ''' returns True if rit directory is dirty '''
   parent_commit_id = rit.get_head_commit_id()
   work_snar = os.path.join(rit.paths.work, 'ref.snar')
@@ -461,7 +591,8 @@ def status_tar(rit: RitCache, verbose: bool):
   os.remove(work_snar)
   return dirty
 
-def create_commit(rit: RitCache, create_time: float, msg: str):
+def create_commit(rit: RitResource, create_time: float, msg: str):
+  ''' create a commit with the current head as the parent commit (if any) '''
   head = rit.head
   parent_commit_id = rit.get_head_commit_id()
   logger.debug("Parent ref: %s", parent_commit_id)
@@ -503,19 +634,27 @@ def create_commit(rit: RitCache, create_time: float, msg: str):
   os.rename(work_tar, tar)
 
   commit = Commit(parent_commit_id, commit_id, create_time, msg)
-  rit.set_commit(commit)
-  head = copy.copy(rit.head)
-  if head.commit_id is not None:
+  rit.add_commit(commit)
+  if rit.head.commit_id is not None:
+    head = copy.copy(rit.head)
     head.commit_id = commit_id
+    rit.set_head(head)
   else:
     rit.set_branch(Branch(head.branch_name, commit_id))
-  rit.set_head(head)
   return commit
 
 
 ''' RESET HELPERS '''
 
-def apply_commit(rit: RitCache, commit: Commit):
+def apply_commit(rit: RitResource, commit: Commit):
+  '''
+  apply the commit to the rit directory
+
+  If the current rit directory isn't clean and isn't the parent of the commit
+  being applied, the results will not be the contents of commit.
+
+  See hard_reset.
+  '''
   logger.info("Applying commit: %s", commit.commit_id)
   tar_file = get_tar_path(rit, commit.commit_id)
   tar_cmd = ['tar', '-xg', os.devnull, '-f', tar_file]
@@ -524,10 +663,16 @@ def apply_commit(rit: RitCache, commit: Commit):
   if exit_code != 0:
     raise RitError("Failed while trying to apply commit: %s", commit.commit_id)
 
-def reset(rit: RitCache, commit: Commit, force: bool):
+def hard_reset(rit: RitResource, commit: Commit, force: bool):
+  '''
+  This gets the chain of commits from commit to root and applies them. It will
+  also check that the current working directory is clean so that we know no data
+  is lost. If the working tree is dirty, then force needs to be set to True to
+  forcibly delete these changes.
+  '''
   logger.debug('resetting to %s', commit.commit_id)
 
-  if status_tar(rit, False) and not force:
+  if not force and status_tar(rit, False):
     raise RitError("Uncommitted changes! Commit them or use -f to destroy them.")
 
   commit_chain = [commit]
@@ -543,6 +688,14 @@ def reset(rit: RitCache, commit: Commit, force: bool):
 
 @dataclass
 class ResolvedRef:
+  '''
+  the user provides a ref, which can reference head, a branch or commit. this
+  object contains the HeadNode, Branch and Commit that the user's ref is
+  referring to. all 3 or None can be defined.
+
+  see resolve_ref
+  '''
+
   commit: Optional[Commit] = None
   '''
   if None:
@@ -556,28 +709,33 @@ class ResolvedRef:
 
   branch: Optional[Branch] = None
   '''
-  if None:
-    if head:
+  if head is None
+    if branch is None:
+      ref doesn't refer to a branch
+    else:
+      ref points to this branch
+  else:
+    if branch is None:
       head points to a commit.
       head points to a branch with no commit.
     else:
-      ref doesn't refer to a branch
-  else:
-    if head:
       head points to this branch
-    else:
-      ref points to this branch
   '''
 
   head: Optional[HeadNode] = None
   '''
-  if None:
+  if head is None:
     ref was provided and not the head
   else:
     ref was omitted or explicitly set to the head
   '''
 
-def resolve_commit(rit: RitCache, partial_commit_id: str):
+def resolve_commit(rit: RitResource, partial_commit_id: str):
+  '''
+  resolve a user provided commit id to a commit. if no commit is found, then
+  return None. if the ref is an ambiguous shortened commit id, then this
+  function raises an exception.
+  '''
   logger.debug("Resolving commit: %s", partial_commit_id)
   commit = rit.get_commit(partial_commit_id)
   if commit is not None:
@@ -597,7 +755,20 @@ def resolve_commit(rit: RitCache, partial_commit_id: str):
       commit = rit.get_commit(commit_id, ensure=True)
   return commit
 
-def resolve_ref(rit: RitCache, ref: Optional[str]):
+def resolve_ref(rit: RitResource, ref: Optional[str]):
+  '''
+  resolve a user provided reference
+
+  if ref is None, then ref refers to the current head. ref can also explicitly
+  refer to the current head. ref otherwise refers to a branch. if the branch is
+  not found, then the ref refers to a commit. if no commit is found, all 3
+  fields of ResolvedRef will be None.
+
+  if the ref is an ambiguous shortened commit id, then this function raises an
+  exception.
+
+  see the def of ResolvedRef
+  '''
   logger.debug("Resolving ref: %s", ref)
   res = ResolvedRef()
   if ref is None or ref == head_ref_name:
@@ -620,15 +791,17 @@ def resolve_ref(rit: RitCache, ref: Optional[str]):
 
 branch_name_re = re.compile('^\\w+$')
 def validate_branch_name(name: str):
+  ''' return whether this string is a valid branch name '''
   if name == head_ref_name:
     raise RitError("Branch can't be named the same as the head ref: %s", name)
   elif branch_name_re.search(name) is None:
     raise RitError("Invalid branch name: %s", name)
 
-def pprint_dur(dur: int, name: str):
+def _pprint_dur(dur: int, name: str):
   return f"{dur} {name}{'s' if dur > 1 else ''}"
 
 def pprint_time_duration(start: float, end: float):
+  ''' pretty print a time duration '''
   start_dt = datetime.datetime.fromtimestamp(start)
   end_dt = datetime.datetime.fromtimestamp(end)
   dur = end - start
@@ -641,20 +814,20 @@ def pprint_time_duration(start: float, end: float):
 
   parts = []
   if dur_year >= 5:
-    parts.append(pprint_dur(int(dur_year), 'year'))
+    parts.append(_pprint_dur(int(dur_year), 'year'))
   elif dur_year >= 1:
-    parts.append(pprint_dur(int(dur_year), 'year'))
-    parts.append(pprint_dur(int(dur_month) % 12, 'month'))
+    parts.append(_pprint_dur(int(dur_year), 'year'))
+    parts.append(_pprint_dur(int(dur_month) % 12, 'month'))
   elif dur_month >= 1:
-    parts.append(pprint_dur(int(dur_month) % 12, 'month'))
+    parts.append(_pprint_dur(int(dur_month) % 12, 'month'))
   elif dur_day >= 1:
-    parts.append(pprint_dur(int(dur_day), 'day'))
+    parts.append(_pprint_dur(int(dur_day), 'day'))
   elif dur_hour >= 1:
-    parts.append(pprint_dur(int(dur_hour) % 60, 'hour'))
+    parts.append(_pprint_dur(int(dur_hour) % 60, 'hour'))
   elif dur_min >= 1:
-    parts.append(pprint_dur(int(dur_min) % 60, 'minute'))
+    parts.append(_pprint_dur(int(dur_min) % 60, 'minute'))
   elif dur_sec >= 20:
-    parts.append(pprint_dur(int(dur_sec) % 60, 'second'))
+    parts.append(_pprint_dur(int(dur_sec) % 60, 'second'))
   else:
     return 'Just now'
   return ', '.join(parts) + ' ago'
@@ -662,9 +835,16 @@ def pprint_time_duration(start: float, end: float):
 
 ''' SUB LOG COMMANDS '''
 
-def log_commit(rit: RitCache, commits: list[Commit]):
-  leafs = set()
-  commit_graph = {}
+def log_commits(rit: RitResource, commits: list[Commit]):
+  '''
+  Returns tuple of the following:
+  - commit_graph: a tree containing all provided commits
+  - leafs: the set of leaf notes of the tree
+  - commit_id_to_commit: a map of each commit to a full Commit object
+  - commit_id_to_branch_names: a map of each commit_id to branch names, including the head_ref_name
+  '''
+  leafs: set[str] = set()
+  commit_graph: dict[str, str] = {}
   for commit in commits:
     if commit.commit_id not in commit_graph:
       leafs.add(commit.commit_id)
@@ -680,10 +860,13 @@ def log_commit(rit: RitCache, commits: list[Commit]):
 
   now = time.time()
   commit_id_to_branch_names = rit.get_commit_id_to_branch_names()
+  commit_id_to_commit: dict[str, Commit] = {}
   for commit_id in leafs:
     logger.info("Log branch from %s", commit_id[:short_hash_index])
     while commit_id is not None:
-      commit = rit.get_commit(commit_id, ensure=True)
+      if commit_id not in commit_id_to_commit:
+        commit_id_to_commit[commit_id] = rit.get_commit(commit_id, ensure=True)
+      commit = commit_id_to_commit[commit_id]
 
       colored_commit_id = colorize(fg + yellow, commit.commit_id[:short_hash_index])
 
@@ -704,28 +887,36 @@ def log_commit(rit: RitCache, commits: list[Commit]):
 
       logger.info("* %s %s%s%s", colored_commit_id, date_details, branch_details, commit.msg)
       commit_id = commit_graph[commit_id]
+  return commit_graph, leafs, commit_id_to_commit, commit_id_to_branch_names
 
 ''' SUB BRANCH COMMANDS '''
 
-def delete_branch(rit: RitCache, name: str):
+def delete_branch(rit: RitResource, name: str):
+  ''' removes a branch '''
   try:
     os.remove(os.path.join(rit.paths.branches, name))
-    return True
   except FileNotFoundError:
-    return False
+    raise RitError("Failed to remove branch since it didn't exist.")
 
-
-def list_branches(rit: RitCache):
+def list_branches(rit: RitResource):
+  ''' logs branches to logger '''
   head = rit.head
-  for branch_name in rit.get_branch_names():
-    this_sym = '*' if branch_name == head.branch_name else ' '
+  head_branch_name = head.branch_name
+  branch_names = rit.get_branch_names()
+  for branch_name in branch_names:
+    this_sym = '*' if branch_name == head_branch_name else ' '
     branch = rit.get_branch(branch_name, ensure=True)
     commit = rit.get_commit(branch.commit_id, ensure=True)
     colored_commit_id = colorize(fg + yellow, branch.commit_id[:short_hash_index])
     colored_branch_name = colorize(fg + green, branch_name)
     logger.info("%s %s\t%s %s", this_sym, colored_branch_name, colored_commit_id, commit.msg)
+  return head, branch_names
 
-def create_branch(rit: RitCache, name: str, ref: Optional[str], force: bool):
+def create_branch(rit: RitResource, name: str, ref: Optional[str], force: bool):
+  '''
+  creates a branch with name name at ref ref. if the branch already exists,
+  force will move the branch to the new commit.
+  '''
   if rit.is_branch(name) and not force:
     raise RitError('Branch already exists: %s. Use -f to force the overwrite of it.', name)
 
@@ -740,8 +931,13 @@ def create_branch(rit: RitCache, name: str, ref: Optional[str], force: bool):
   branch = Branch(name, commit_id)
   rit.set_branch(branch)
   logger.info("Created branch %s at %s", name, commit_id[:short_hash_index])
+  return res
 
-def log_refs(rit: RitCache, refs: list[str], all: bool, full: bool):
+def log_refs(rit: RitResource, refs: list[str], all: bool, full: bool):
+  '''
+  Returns the commit tree containing the given refs. If none are given, assumes
+  head. If all is true, appends refs.
+  '''
   commits = []
 
   if not refs:
@@ -757,9 +953,27 @@ def log_refs(rit: RitCache, refs: list[str], all: bool, full: bool):
         raise RitError("Unable to locate ref: %s", ref)
     commits.append(res.commit)
 
-  log_commit(rit, commits)
+  return log_commits(rit, commits)
 
-def show_ref(rit: RitCache, ref: Optional[str]):
+def info_refs(rit: RitResource, refs: list[str], all: bool):
+  '''
+  Returns information regarding the provided refs
+  '''
+  resolved_refs: list[ResolvedRef] = []
+
+  if not refs:
+    refs.append(None)
+  if all:
+    refs.extend(rit.get_branch_names())
+  for ref in refs:
+    res = resolve_ref(rit, ref)
+    resolved_refs.append(res)
+
+  commit_id_to_branch_names = rit.get_commit_id_to_branch_names()
+  return resolved_refs, commit_id_to_branch_names
+
+def show_ref(rit: RitResource, ref: Optional[str]):
+  ''' log the contents of a specific reference '''
   res = resolve_ref(rit, ref)
   if res.commit is None:
     if res.head is not None:
@@ -770,6 +984,7 @@ def show_ref(rit: RitCache, ref: Optional[str]):
   tar_file = get_tar_path(rit, res.commit.commit_id)
   tar_cmd = ['tar', '-tf', tar_file]
   process = subprocess.Popen(tar_cmd, stdout=subprocess.PIPE)
+  changes = []
   while True:
     line = process.stdout.readline()
     if not line:
@@ -777,46 +992,48 @@ def show_ref(rit: RitCache, ref: Optional[str]):
     elif line == b'./\n':
       continue
     output = line.decode('utf-8').strip()
+    changes.append(output)
     logger.info("\t- %s", colorize(fg + cyan, output))
   results = process.wait()
   if results != 0:
-    logger.error("tar command failed with exit code %d", results)
+    raise RitError("tar command failed with exit code %d", results)
+  return res, changes
 
-def status_head(rit: RitCache):
+def status_head(rit: RitResource):
+  ''' run status_tar on HEAD with logging '''
   if rit.head.branch_name is not None:
     head_id = rit.head.branch_name
   else:
     head_id = rit.head.commit_id
-  logger.info("HEAD -> %s", head_id)
+  logger.info("%s -> %s", head_ref_name, head_id)
   if not status_tar(rit, True):
     logger.info("Clean working directory!")
 
 ''' API '''
 
-def init():
+def init(*, root_rit_dir: str):
   logger.debug("init")
-  try:
-    paths = RitPaths.build_rit_paths(os.getcwd(), init=True)
-    logger.info("Successfully created rit directory: %s", paths.rit_dir)
-    return 0
+  rit = RitResource(root_rit_dir)
+  rit.initialize()
 
-  except FileExistsError:
-    paths = RitPaths.build_rit_paths(os.getcwd())
-    logger.error("The rit directory already exists: %s", paths.rit_dir)
-    return 1
-
-def commit(*, msg: str):
+def commit(*, root_rit_dir, msg: str):
   logger.debug('commit')
   logger.debug('  msg: %s', msg)
   check_types(
     msg = (msg, exact_t(str)),
   )
 
-  rit = RitCache()
+  rit = RitResource(root_rit_dir)
   commit = create_commit(rit, time.time(), msg)
   logger.info("Created commit %s: %s", commit.commit_id[:short_hash_index], commit.msg)
+  return commit
 
-def checkout(*, ref: str, force: bool):
+def checkout(*, root_rit_dir: str, ref: str, force: bool):
+  '''
+  Checkout ref (overwriting any changes if force is True).
+
+  Returns ref resolved, as a ResolvedRef.
+  '''
   logger.debug('checkout')
   logger.debug('  ref: %s', ref)
   logger.debug('  force: %s', force)
@@ -825,7 +1042,7 @@ def checkout(*, ref: str, force: bool):
     force = (force, exact_t(bool)),
   )
 
-  rit = RitCache()
+  rit = RitResource(root_rit_dir)
   res = resolve_ref(rit, ref)
   if res.head is not None:
     raise RitError("Attempted to checkout head ref")
@@ -835,7 +1052,7 @@ def checkout(*, ref: str, force: bool):
 
   head_commit_id = rit.get_head_commit_id()
   if head_commit_id is not None and head_commit_id != commit.commit_id:
-    reset(rit, commit, force)
+    hard_reset(rit, commit, force)
   head = copy.copy(rit.head)
   if res.branch is not None:
     head.branch_name = res.branch.name
@@ -846,10 +1063,14 @@ def checkout(*, ref: str, force: bool):
   rit.set_head(head)
 
   logger.info("Successful checkout. Commit this checkout to get a clean rit status.")
+  return res
 
-def branch(*, name: Optional[str], ref: Optional[str], force: bool, delete: bool):
+def branch(*, root_rit_dir: str, name: Optional[str], ref: Optional[str], force: bool, delete: bool):
   '''
   ref is a ref name or commit id or head_ref_name
+
+  If creating a branch, returns ref resolved, as ResolvedRef.
+  If listing all branches, returns (current_branch_name: str, all_branch_names: list[str])
   '''
   logger.debug('branch')
   logger.debug('  name: %s', name)
@@ -863,7 +1084,7 @@ def branch(*, name: Optional[str], ref: Optional[str], force: bool, delete: bool
     delete = (delete, exact_t(bool)),
   )
 
-  rit = RitCache()
+  rit = RitResource(root_rit_dir)
 
   if name is not None:
     validate_branch_name(name)
@@ -878,8 +1099,7 @@ def branch(*, name: Optional[str], ref: Optional[str], force: bool, delete: bool
     elif ref is not None:
       raise RitError("You can't specify a reference branch with the delete option")
 
-    if not delete_branch(rit, name):
-      raise RitError("Failed to remove branch since it didn't exist.")
+    delete_branch(rit, name)
 
   elif name is None:
     if force:
@@ -892,7 +1112,7 @@ def branch(*, name: Optional[str], ref: Optional[str], force: bool, delete: bool
   else:
     return create_branch(rit, name, ref, force)
 
-def log(*, refs: list[str], all: bool, full: bool):
+def log(*, root_rit_dir: str, refs: list[str], all: bool, full: bool):
   logger.debug('log')
   logger.debug('  refs: %s', refs)
   logger.debug('  all: %s', all)
@@ -900,65 +1120,79 @@ def log(*, refs: list[str], all: bool, full: bool):
   check_types(
     refs = (refs, list_t(exact_t(str))),
     all = (all, exact_t(bool)),
+    full = (full, exact_t(bool)),
   )
 
-  rit = RitCache()
-  log_refs(rit, refs, all, full)
+  rit = RitResource(root_rit_dir)
+  return log_refs(rit, refs, all, full)
 
-def show(*, ref: Optional[str]):
+def show(*, root_rit_dir: str, ref: Optional[str]):
   logger.debug('show')
   logger.debug('  ref: %s', ref)
   check_types(ref = (ref, optional_t(exact_t(str))))
 
-  rit = RitCache()
-  show_ref(rit, ref)
+  rit = RitResource(root_rit_dir)
+  return show_ref(rit, ref)
 
-def status():
+def status(*, root_rit_dir: str):
   logger.debug('status')
 
-  rit = RitCache()
+  rit = RitResource(root_rit_dir)
   status_head(rit)
 
-def reflog():
+def reflog(*, root_rit_dir: str):
   logger.debug('reflog')
 
-  rit = RitCache()
+  rit = RitResource(root_rit_dir)
   raise NotImplementedError()
 
-def prune():
+def prune(*, root_rit_dir: str):
   # Prune lost branches
   logger.debug('prune')
 
-  rit = RitCache()
+  rit = RitResource(root_rit_dir)
   raise NotImplementedError()
 
-def reroot():
+def reroot(*, root_rit_dir: str):
   # Move the root to the latest common ancestor of all branches
   logger.debug('reroot')
 
-  rit = RitCache()
+  rit = RitResource(root_rit_dir)
   raise NotImplementedError()
 
+''' PYTHON ONLY API '''
+
+def info(*, root_rit_dir: str, refs: list[str], all: bool):
+  logger.debug('info')
+  logger.debug('  refs: %s', refs)
+  logger.debug('  all: %s', all)
+  check_types(
+    refs = (refs, list_t(exact_t(str))),
+    all = (all, exact_t(bool)),
+  )
+
+  rit = RitResource(root_rit_dir)
+  return info_refs(rit, refs, all)
 
 ''' ARG HANDLERS '''
 
 def init_main(argv, prog):
   parser = argparse.ArgumentParser(description="Initialize a raw backup directory", prog=prog)
   args = parser.parse_args(argv)
-  return init(**vars(args))
+  init(root_rit_dir=os.getcwd(), **vars(args))
 
 def commit_main(argv, prog):
   parser = argparse.ArgumentParser(description="Create a commit from the current state", prog=prog)
   parser.add_argument('msg', help="The commit msg")
   args = parser.parse_args(argv)
-  return commit(**vars(args))
+  commit(root_rit_dir=os.getcwd(), **vars(args))
 
 def checkout_main(argv, prog):
   parser = argparse.ArgumentParser(description="Log the current commit history", prog=prog)
   parser.add_argument('ref', help="The ref to checkout")
   parser.add_argument('-f', '--force', action='store_true', help="If there are uncommitted changes, automatically remove them.")
   args = parser.parse_args(argv)
-  return checkout(**vars(args))
+  checkout(root_rit_dir=os.getcwd(), **vars(args))
 
 def branch_main(argv, prog):
   parser = argparse.ArgumentParser(description="Create a new branch", prog=prog)
@@ -967,18 +1201,18 @@ def branch_main(argv, prog):
   parser.add_argument('-f', '--force', action='store_true', help="The head of the new branch. By default, the current commit is used.")
   parser.add_argument('-d', '--delete', action='store_true', help="Delete the specified branch.")
   args = parser.parse_args(argv)
-  return branch(**vars(args))
+  branch(root_rit_dir=os.getcwd(), **vars(args))
 
 def show_main(argv, prog):
   parser = argparse.ArgumentParser(description="Show contents of a commit", prog=prog)
   parser.add_argument('ref', nargs='?', help="The ref to show commit contents of. By default, head.")
   args = parser.parse_args(argv)
-  return show(**vars(args))
+  show(root_rit_dir=os.getcwd(), **vars(args))
 
 def status_main(argv, prog):
   parser = argparse.ArgumentParser(description="Show the current directory's diff state.", prog=prog)
   args = parser.parse_args(argv)
-  return status(**vars(args))
+  status(root_rit_dir=os.getcwd(), **vars(args))
 
 def log_main(argv, prog):
   parser = argparse.ArgumentParser(description="Log the current commit history", prog=prog)
@@ -986,7 +1220,7 @@ def log_main(argv, prog):
   parser.add_argument('--all', action='store_true', help="Include all branches")
   parser.add_argument('--full', action='store_true', help="Include more log data")
   args = parser.parse_args(argv)
-  return log(**vars(args))
+  log(root_rit_dir=os.getcwd(), **vars(args))
 
 command_handlers = dict(
   init = init_main,
@@ -1028,7 +1262,8 @@ def main(argv):
   logger.debug("Extra args: %s", sub_argv)
   setup_logger(args.verbose - args.quiet)
   try:
-    return command_handlers[args.command](sub_argv, prog=f'{parser.prog} {args.command}')
+    command_handlers[args.command](sub_argv, prog=f'{parser.prog} {args.command}')
+    return 0
   except RitError as exc:
     logger.error(exc.msg, *exc.args)
     return 1
