@@ -503,15 +503,18 @@ def require(statement, msg, *args):
 ''' RIT DIR HELPERS '''
 
 def get_tar_path(rit: RitResource, commit_id: str):
+  ''' get a commit's tar path, where the backup for that commit is '''
   return os.path.join(rit.paths.backups, commit_id + '.tar')
 
 def get_snar_path(rit: RitResource, commit_id: str):
+  ''' get a commit's star path, where the backup's metadata for that commit is '''
   return os.path.join(rit.paths.backups, commit_id + '.snar')
 
 
 ''' COMMIT HELPERS '''
 
 def hash_commit(create_time: float, msg: str, snar: str, tar: str):
+  ''' create a commit_id from '''
   logger.debug("Calculating the hash of ref")
   ref_hash = hashlib.sha1()
 
@@ -532,6 +535,7 @@ def hash_commit(create_time: float, msg: str, snar: str, tar: str):
   return ref_hash.hexdigest()
 
 def check_tar():
+  ''' verify tar is the correct version and GNU '''
   logger.debug("Checking tar version")
   process = subprocess.Popen(['tar', '--version'], stdout=subprocess.PIPE)
   contents = process.stdout.read()
@@ -588,6 +592,7 @@ def status_tar(rit: RitResource, verbose: bool):
   return dirty
 
 def create_commit(rit: RitResource, create_time: float, msg: str):
+  ''' create a commit with the current head as the parent commit (if any) '''
   head = rit.head
   parent_commit_id = rit.get_head_commit_id()
   logger.debug("Parent ref: %s", parent_commit_id)
@@ -630,18 +635,26 @@ def create_commit(rit: RitResource, create_time: float, msg: str):
 
   commit = Commit(parent_commit_id, commit_id, create_time, msg)
   rit.add_commit(commit)
-  head = copy.copy(rit.head)
-  if head.commit_id is not None:
+  if rit.head.commit_id is not None:
+    head = copy.copy(rit.head)
     head.commit_id = commit_id
+    rit.set_head(head)
   else:
     rit.set_branch(Branch(head.branch_name, commit_id))
-  rit.set_head(head)
   return commit
 
 
 ''' RESET HELPERS '''
 
 def apply_commit(rit: RitResource, commit: Commit):
+  '''
+  apply the commit to the rit directory
+
+  If the current rit directory isn't clean and isn't the parent of the commit
+  being applied, the results will not be the contents of commit.
+
+  See hard_reset.
+  '''
   logger.info("Applying commit: %s", commit.commit_id)
   tar_file = get_tar_path(rit, commit.commit_id)
   tar_cmd = ['tar', '-xg', os.devnull, '-f', tar_file]
@@ -650,10 +663,16 @@ def apply_commit(rit: RitResource, commit: Commit):
   if exit_code != 0:
     raise RitError("Failed while trying to apply commit: %s", commit.commit_id)
 
-def reset(rit: RitResource, commit: Commit, force: bool):
+def hard_reset(rit: RitResource, commit: Commit, force: bool):
+  '''
+  This gets the chain of commits from commit to root and applies them. It will
+  also check that the current working directory is clean so that we know no data
+  is lost. If the working tree is dirty, then force needs to be set to True to
+  forcibly delete these changes.
+  '''
   logger.debug('resetting to %s', commit.commit_id)
 
-  if status_tar(rit, False) and not force:
+  if not force and status_tar(rit, False):
     raise RitError("Uncommitted changes! Commit them or use -f to destroy them.")
 
   commit_chain = [commit]
@@ -669,6 +688,14 @@ def reset(rit: RitResource, commit: Commit, force: bool):
 
 @dataclass
 class ResolvedRef:
+  '''
+  the user provides a ref, which can reference head, a branch or commit. this
+  object contains the HeadNode, Branch and Commit that the user's ref is
+  referring to. all 3 or None can be defined.
+
+  see resolve_ref
+  '''
+
   commit: Optional[Commit] = None
   '''
   if None:
@@ -682,28 +709,33 @@ class ResolvedRef:
 
   branch: Optional[Branch] = None
   '''
-  if None:
-    if head:
+  if head is None
+    if branch is None:
+      ref doesn't refer to a branch
+    else:
+      ref points to this branch
+  else:
+    if branch is None:
       head points to a commit.
       head points to a branch with no commit.
     else:
-      ref doesn't refer to a branch
-  else:
-    if head:
       head points to this branch
-    else:
-      ref points to this branch
   '''
 
   head: Optional[HeadNode] = None
   '''
-  if None:
+  if head is None:
     ref was provided and not the head
   else:
     ref was omitted or explicitly set to the head
   '''
 
 def resolve_commit(rit: RitResource, partial_commit_id: str):
+  '''
+  resolve a user provided commit id to a commit. if no commit is found, then
+  return None. if the ref is an ambiguous shortened commit id, then this
+  function raises an exception.
+  '''
   logger.debug("Resolving commit: %s", partial_commit_id)
   commit = rit.get_commit(partial_commit_id)
   if commit is not None:
@@ -724,6 +756,19 @@ def resolve_commit(rit: RitResource, partial_commit_id: str):
   return commit
 
 def resolve_ref(rit: RitResource, ref: Optional[str]):
+  '''
+  resolve a user provided reference
+
+  if ref is None, then ref refers to the current head. ref can also explicitly
+  refer to the current head. ref otherwise refers to a branch. if the branch is
+  not found, then the ref refers to a commit. if no commit is found, all 3
+  fields of ResolvedRef will be None.
+
+  if the ref is an ambiguous shortened commit id, then this function raises an
+  exception.
+
+  see the def of ResolvedRef
+  '''
   logger.debug("Resolving ref: %s", ref)
   res = ResolvedRef()
   if ref is None or ref == head_ref_name:
@@ -746,15 +791,17 @@ def resolve_ref(rit: RitResource, ref: Optional[str]):
 
 branch_name_re = re.compile('^\\w+$')
 def validate_branch_name(name: str):
+  ''' return whether this string is a valid branch name '''
   if name == head_ref_name:
     raise RitError("Branch can't be named the same as the head ref: %s", name)
   elif branch_name_re.search(name) is None:
     raise RitError("Invalid branch name: %s", name)
 
-def pprint_dur(dur: int, name: str):
+def _pprint_dur(dur: int, name: str):
   return f"{dur} {name}{'s' if dur > 1 else ''}"
 
 def pprint_time_duration(start: float, end: float):
+  ''' pretty print a time duration '''
   start_dt = datetime.datetime.fromtimestamp(start)
   end_dt = datetime.datetime.fromtimestamp(end)
   dur = end - start
@@ -767,20 +814,20 @@ def pprint_time_duration(start: float, end: float):
 
   parts = []
   if dur_year >= 5:
-    parts.append(pprint_dur(int(dur_year), 'year'))
+    parts.append(_pprint_dur(int(dur_year), 'year'))
   elif dur_year >= 1:
-    parts.append(pprint_dur(int(dur_year), 'year'))
-    parts.append(pprint_dur(int(dur_month) % 12, 'month'))
+    parts.append(_pprint_dur(int(dur_year), 'year'))
+    parts.append(_pprint_dur(int(dur_month) % 12, 'month'))
   elif dur_month >= 1:
-    parts.append(pprint_dur(int(dur_month) % 12, 'month'))
+    parts.append(_pprint_dur(int(dur_month) % 12, 'month'))
   elif dur_day >= 1:
-    parts.append(pprint_dur(int(dur_day), 'day'))
+    parts.append(_pprint_dur(int(dur_day), 'day'))
   elif dur_hour >= 1:
-    parts.append(pprint_dur(int(dur_hour) % 60, 'hour'))
+    parts.append(_pprint_dur(int(dur_hour) % 60, 'hour'))
   elif dur_min >= 1:
-    parts.append(pprint_dur(int(dur_min) % 60, 'minute'))
+    parts.append(_pprint_dur(int(dur_min) % 60, 'minute'))
   elif dur_sec >= 20:
-    parts.append(pprint_dur(int(dur_sec) % 60, 'second'))
+    parts.append(_pprint_dur(int(dur_sec) % 60, 'second'))
   else:
     return 'Just now'
   return ', '.join(parts) + ' ago'
@@ -845,12 +892,14 @@ def log_commits(rit: RitResource, commits: list[Commit]):
 ''' SUB BRANCH COMMANDS '''
 
 def delete_branch(rit: RitResource, name: str):
+  ''' removes a branch '''
   try:
     os.remove(os.path.join(rit.paths.branches, name))
   except FileNotFoundError:
     raise RitError("Failed to remove branch since it didn't exist.")
 
 def list_branches(rit: RitResource):
+  ''' logs branches to logger '''
   head = rit.head
   head_branch_name = head.branch_name
   branch_names = rit.get_branch_names()
@@ -864,6 +913,10 @@ def list_branches(rit: RitResource):
   return head, branch_names
 
 def create_branch(rit: RitResource, name: str, ref: Optional[str], force: bool):
+  '''
+  creates a branch with name name at ref ref. if the branch already exists,
+  force will move the branch to the new commit.
+  '''
   if rit.is_branch(name) and not force:
     raise RitError('Branch already exists: %s. Use -f to force the overwrite of it.', name)
 
@@ -920,6 +973,7 @@ def info_refs(rit: RitResource, refs: list[str], all: bool):
   return resolved_refs, commit_id_to_branch_names
 
 def show_ref(rit: RitResource, ref: Optional[str]):
+  ''' log the contents of a specific reference '''
   res = resolve_ref(rit, ref)
   if res.commit is None:
     if res.head is not None:
@@ -946,6 +1000,7 @@ def show_ref(rit: RitResource, ref: Optional[str]):
   return res, changes
 
 def status_head(rit: RitResource):
+  ''' run status_tar on HEAD with logging '''
   if rit.head.branch_name is not None:
     head_id = rit.head.branch_name
   else:
@@ -997,7 +1052,7 @@ def checkout(*, root_rit_dir: str, ref: str, force: bool):
 
   head_commit_id = rit.get_head_commit_id()
   if head_commit_id is not None and head_commit_id != commit.commit_id:
-    reset(rit, commit, force)
+    hard_reset(rit, commit, force)
   head = copy.copy(rit.head)
   if res.branch is not None:
     head.branch_name = res.branch.name
