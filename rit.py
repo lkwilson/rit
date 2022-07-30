@@ -33,6 +33,8 @@ black, red, green, yellow, blue, magenta, cyan, white = range(8)
 
 @dataclass
 class RitPaths:
+  ''' a class that represents the various directories used by rit '''
+
   root: str
   ''' The directory to backup is stored here '''
 
@@ -57,6 +59,10 @@ class RitPaths:
 
   @staticmethod
   def build_rit_paths(root: str, init: bool = False):
+    '''
+    Given a root rit directory, construct a rit paths object and ensure rit
+    subdirectories exist. If init is True, the root rit path will be created.
+    '''
     root = os.path.realpath(root)
     rit_dir = os.path.join(root, rit_dir_name)
     if init:
@@ -80,10 +86,19 @@ class RitPaths:
 
 @dataclass
 class Commit:
+  ''' represents a single commit '''
+
   parent_commit_id: Optional[str]
+  ''' the commit id of parent, if any '''
+
   commit_id: str
+  ''' the current commit's commit id '''
+
   create_time: float
+  ''' the creation time of commit in seconds since posix '''
+
   msg: str
+  ''' the commit msg'''
 
   def __post_init__(self):
     check_obj_types(self, dict(
@@ -95,8 +110,13 @@ class Commit:
 
 @dataclass
 class Branch:
+  ''' represents a branch '''
+
   name: str
+  ''' the branch name '''
+
   commit_id: str
+  ''' the commit id tied to the branch '''
 
   info: str = ''
   '''
@@ -111,8 +131,19 @@ class Branch:
 
 @dataclass
 class HeadNode:
+  '''
+  the rit directory's current location
+
+  head is either a commit or a branch, but not both
+
+  it is possible for the branch_name to not have a commit
+  '''
+
   commit_id: Optional[str] = None
+  ''' the current dir is based off of this commit id, if any '''
+
   branch_name: Optional[str] = None
+  ''' the current head is tied to this branch. new commits move the branch. '''
 
   def __post_init__(self):
     check_obj_types(self, dict(
@@ -123,6 +154,14 @@ class HeadNode:
       raise TypeError(head_ref_name + " must be a branch name or a commit id")
 
 class RitError(Exception):
+  '''
+  an error raised by rit
+
+  how to render:
+    error_msg = exc.msg % exc.args
+    logger.error(exc.msg, *exc.args)
+  '''
+
   def __init__(self, msg, *args):
     super(RitError, self).__init__()
     self.msg = msg
@@ -130,16 +169,46 @@ class RitError(Exception):
 
 @dataclass
 class RitResource:
+  '''
+  a resource to query the rit directory and cache results
+
+  All interactions with the rit directory should go through this object.
+
+  Any external changes to the rit directory invalidate's this object's cache and
+  in that case, _clear should be called. However, no user of this resource
+  should be calling _clear. Instead this class' api should be extended and that
+  new method should call _clear.
+  '''
+
   root_rit_dir: str
+  ''' the root rit directory '''
+
   _paths: RitPaths = None
+  ''' cache for paths property '''
+
   _head: HeadNode = None
+  ''' cache for head property '''
+
   _commits: dict[str, Commit] = field(default_factory=dict)
+  ''' cache for get_commit '''
+
   _branches: dict[str, Branch] = field(default_factory=dict)
+  ''' cache for get_branch '''
+
   _branch_name_to_commit_ids: dict[str, str] = None
+  ''' cache for get_branch_name_to_commit_ids '''
+
   _commit_id_to_branch_names: dict[str, list[str]] = None
+  ''' cache for get_commit_id_to_branch_names '''
+
   _branch_names: list[str] = None
+  ''' cache for get_branch_names '''
+
   _commit_ids: list[str] = None
+  ''' cache for get_commit_ids '''
+
   _short_commit_tree: dict[str, list[str]] = None
+  ''' cache for get_commit_tree '''
 
   def __post_init__(self) -> None:
     check_obj_types(self, dict(
@@ -147,6 +216,11 @@ class RitResource:
     ))
 
   def initialize(self):
+    '''
+    creates the rit directory
+
+    if already initialized, raise RitError
+    '''
     try:
       paths = RitPaths.build_rit_paths(self.root_rit_dir, init=True)
       logger.info("Successfully created rit directory: %s", paths.rit_dir)
@@ -155,44 +229,51 @@ class RitResource:
 
   def _clear(self):
     ''' If the rit directory is modified, then the cache must be cleared '''
-    self._head = None
-    self._commits = {}
-    self._branches = {}
-    self._branch_name_to_commit_ids = None
-    self._commit_id_to_branch_names = None
-    self._branch_names = None
-    self._commit_ids = None
-    self._short_commit_tree = None
+    cleared_rit = RitResource(self.root_rit_dir)
+    self._head = cleared_rit._head
+    self._commits = cleared_rit._commits
+    self._branches = cleared_rit._branches
+    self._branch_name_to_commit_ids = cleared_rit._branch_name_to_commit_ids
+    self._commit_id_to_branch_names = cleared_rit._commit_id_to_branch_names
+    self._branch_names = cleared_rit._branch_names
+    self._commit_ids = cleared_rit._commit_ids
+    self._short_commit_tree = cleared_rit._short_commit_tree
 
   ''' SET '''
 
-  def set_commit(self, commit: Commit):
+  def add_commit(self, commit: Commit):
+    ''' add the commit to the rit dir '''
     self._write_commit(commit)
     self._clear()
 
   def set_branch(self, branch: Branch):
+    ''' add the branch to the rit dir '''
     self._write_branch(branch)
     self._clear()
 
   def set_head(self, head: HeadNode):
+    ''' set the new head point '''
     self._write_head(head)
-    self._head = None
+    self._clear()
 
   ''' GET '''
 
   @property
   def paths(self):
+    ''' returns a RitPaths object for this rit directory '''
     if self._paths is None:
       self._paths = self._read_paths()
     return self._paths
 
   @property
   def head(self):
+    ''' returns the HeadNode object for this rit directory '''
     if self._head is None:
       self._head = self._read_head()
     return self._head
 
   def get_head_commit_id(self):
+    ''' get the commit id of the head, None if there isn't one '''
     head = self.head
     if head.commit_id is not None:
       return head.commit_id
@@ -204,11 +285,19 @@ class RitResource:
         return None
 
   def get_commit_ids(self):
+    ''' get all commit ids '''
     if self._commit_ids is None:
       self._commit_ids = self._read_commit_ids()
     return self._commit_ids
 
   def get_commit(self, commit_id: str, *, ensure=False):
+    '''
+    get commit object of a commit id
+
+    return a commit if found
+
+    otherwise return None, if ensure is set to True, the raise instead of return None.
+    '''
     if commit_id not in self._commits:
       try:
         self._commits[commit_id] = self._read_commit(commit_id)
@@ -219,14 +308,21 @@ class RitResource:
     return self._commits[commit_id]
 
   def is_commit(self, commit_id: str):
+    ''' return True if commit_id has a commit '''
     return self.get_commit(commit_id) is not None
 
   def get_branch_names(self):
+    ''' return names of all branches '''
     if self._branch_names is None:
       self._branch_names = self._read_branch_names()
     return self._branch_names
 
   def get_branch(self, name: str, *, ensure=False):
+    '''
+    query for branch by name
+
+    returns None if not found. raises RitError instead if ensure is True
+    '''
     if name not in self._branches:
       try:
         self._branches[name] = self._read_branch(name)
@@ -237,9 +333,45 @@ class RitResource:
     return self._branches[name]
 
   def is_branch(self, name: str):
+    ''' return True if the branch name has a branch '''
     return self.get_branch(name) is not None
 
-  def populate_commit_to_branch_map(self):
+  def get_branch_name_to_commit_ids(self):
+    ''' see _populate_commit_to_branch_map '''
+    if self._branch_name_to_commit_ids is None:
+      self._populate_commit_to_branch_map()
+    return self._branch_name_to_commit_ids
+
+  def get_commit_id_to_branch_names(self):
+    ''' see _populate_commit_to_branch_map '''
+    if self._commit_id_to_branch_names is None:
+      self._populate_commit_to_branch_map()
+    return self._commit_id_to_branch_names
+
+  def get_commit_tree(self):
+    '''
+    returns a map of shortened commit prefixes to a list of all commit ids with
+    that prefix
+
+    the tree is used to find full commit ids given partial ones.
+    '''
+    if self._short_commit_tree is None:
+      self._short_commit_tree = defaultdict(list)
+      for commit_id in self.get_commit_ids():
+        self._short_commit_tree[commit_id[:short_hash_index]].append(commit_id)
+    return self._short_commit_tree
+
+  ''' helpers '''
+
+  def _populate_commit_to_branch_map(self):
+    '''
+    populate the commit <-> branch maps
+
+    branches include the HEAD node
+
+    if a branch doesn't have a commit, the commit and branch will not have
+    entries in the maps
+    '''
     branch_names = self.get_branch_names()
     self._branch_name_to_commit_ids = {}
     self._commit_id_to_branch_names = defaultdict(list)
@@ -252,23 +384,6 @@ class RitResource:
     if head_commit_id is not None:
       self._branch_name_to_commit_ids[head_ref_name] = head_commit_id
       self._commit_id_to_branch_names[head_commit_id].append(head_ref_name)
-
-  def get_branch_name_to_commit_ids(self):
-    if self._branch_name_to_commit_ids is None:
-      self.populate_commit_to_branch_map()
-    return self._branch_name_to_commit_ids
-
-  def get_commit_id_to_branch_names(self):
-    if self._commit_id_to_branch_names is None:
-      self.populate_commit_to_branch_map()
-    return self._commit_id_to_branch_names
-
-  def get_commit_tree(self):
-    if self._short_commit_tree is None:
-      self._short_commit_tree = defaultdict(list)
-      for commit_id in self.get_commit_ids():
-        self._short_commit_tree[commit_id[:short_hash_index]].append(commit_id)
-    return self._short_commit_tree
 
   ''' IO '''
 
@@ -514,7 +629,7 @@ def create_commit(rit: RitResource, create_time: float, msg: str):
   os.rename(work_tar, tar)
 
   commit = Commit(parent_commit_id, commit_id, create_time, msg)
-  rit.set_commit(commit)
+  rit.add_commit(commit)
   head = copy.copy(rit.head)
   if head.commit_id is not None:
     head.commit_id = commit_id
