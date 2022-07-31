@@ -184,7 +184,7 @@ class RitResource:
   root_rit_dir: str
   ''' the root rit directory '''
 
-  prevent_mutations: bool = True
+  prevent_mutations: bool = False
   '''
   Set to True to prevent setter functions. Setting this to True makes it safe to
   give to consumers of this api. It prevents them from changing the rit dir
@@ -966,23 +966,6 @@ def log_refs(rit: RitResource, refs: list[str], all: bool, full: bool):
     commits.append(res.commit)
 
   return log_commits(rit, commits)
-
-def info_refs(rit: RitResource, refs: list[str], all: bool):
-  '''
-  Returns information regarding the provided refs
-  '''
-  resolved_refs: list[ResolvedRef] = []
-
-  if not refs:
-    refs.append(None)
-  if all:
-    refs.extend(rit.get_branch_names())
-  for ref in refs:
-    res = resolve_ref(rit, ref)
-    resolved_refs.append(res)
-
-  commit_id_to_branch_names = rit.get_commit_id_to_branch_names()
-  return resolved_refs, commit_id_to_branch_names
 
 def show_ref(rit: RitResource, ref: Optional[str]):
   ''' log the contents of a specific reference '''
