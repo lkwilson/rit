@@ -665,6 +665,9 @@ def apply_commit(rit: RitResource, commit: Commit):
 
 def hard_reset(rit: RitResource, commit: Commit, force: bool):
   '''
+  This is technically wrong since if head is a branch it should move too, but it
+  doesn't.
+
   This gets the chain of commits from commit to root and applies them. It will
   also check that the current working directory is clean so that we know no data
   is lost. If the working tree is dirty, then force needs to be set to True to
@@ -1028,11 +1031,35 @@ def commit(*, root_rit_dir, msg: str):
   logger.info("Created commit %s: %s", commit.commit_id[:short_hash_index], commit.msg)
   return commit
 
+def reset(*, root_rit_dir: str, ref: str, hard: bool):
+  '''
+  A reset tries to move the head to ref. If head is a branch, it instead moves
+  the branch. If head is a commit, it just moves head to the new commit. If it's
+  a hard reset, then post moving head, the working changes are removed.
+
+  In git world, reset with no args is --mixed. The difference between --mixed
+  and --soft has to do with staged changes. Here, we don't have staged changes,
+  so --soft and --mixed are effectively the same. For that reason, here, we just
+  --refer to that as a normal reset (as opposed to hard).
+  '''
+  pass
+
 def checkout(*, root_rit_dir: str, ref: str, force: bool):
   '''
   Checkout ref (overwriting any changes if force is True).
 
   Returns ref resolved, as a ResolvedRef.
+
+  The end result is that head points to ref, and the working directory is
+  restored to the point of ref.
+
+  It is the equivalent of the following:
+  - if head is a branch, set head to the underlying commit
+  - hard reset to ref
+  - set head to ref
+  Or if you allow head to be moved to non equivalent commits:
+  - set head to ref
+  - hard reset to new head
   '''
   logger.debug('checkout')
   logger.debug('  ref: %s', ref)
