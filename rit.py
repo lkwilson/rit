@@ -132,11 +132,12 @@ class Branch:
 @dataclass
 class HeadNode:
   '''
-  the rit directory's current location
+  The rit directory's current location. This is a branch or a commit. It is
+  possible for a branch to be an orphan branch and have no commit, yet.
 
-  head is either a commit or a branch, but not both
-
-  it is possible for the branch_name to not have a commit
+  Since commit_id or branch_name must be non None, to have no commit, it must
+  have a branch. Like git, you cannot have head point to no commit without it
+  pointing to a branch.
   '''
 
   commit_id: Optional[str] = None
@@ -175,13 +176,20 @@ class RitResource:
   All interactions with the rit directory should go through this object.
 
   Any external changes to the rit directory invalidate's this object's cache and
-  in that case, _clear should be called. However, no user of this resource
-  should be calling _clear. Instead this class' api should be extended and that
-  new method should call _clear.
+  in that case, clear should be called. However, no user of this resource
+  should be calling clear. Instead this class' api should be extended and that
+  new method should call clear.
   '''
 
   root_rit_dir: str
   ''' the root rit directory '''
+
+  prevent_mutations: bool = True
+  '''
+  Set to True to prevent setter functions. Setting this to True makes it safe to
+  give to consumers of this api. It prevents them from changing the rit dir
+  directly.
+  '''
 
   _paths: RitPaths = None
   ''' cache for paths property '''
@@ -227,7 +235,7 @@ class RitResource:
     except FileExistsError:
       raise RitError("The rit directory already exists: %s", self.paths.rit_dir)
 
-  def _clear(self):
+  def clear(self):
     ''' If the rit directory is modified, then the cache must be cleared '''
     cleared_rit = RitResource(self.root_rit_dir)
     self._head = cleared_rit._head
@@ -243,18 +251,24 @@ class RitResource:
 
   def add_commit(self, commit: Commit):
     ''' add the commit to the rit dir '''
+    if self.prevent_mutations:
+      raise RitError("Doing this would mutate the rit directory, and that is disabled for this RitResource")
     self._write_commit(commit)
-    self._clear()
+    self.clear()
 
   def set_branch(self, branch: Branch):
     ''' add the branch to the rit dir '''
+    if self.prevent_mutations:
+      raise RitError("Doing this would mutate the rit directory, and that is disabled for this RitResource")
     self._write_branch(branch)
-    self._clear()
+    self.clear()
 
   def set_head(self, head: HeadNode):
     ''' set the new head point '''
+    if self.prevent_mutations:
+      raise RitError("Doing this would mutate the rit directory, and that is disabled for this RitResource")
     self._write_head(head)
-    self._clear()
+    self.clear()
 
   ''' GET '''
 
@@ -653,7 +667,7 @@ def apply_commit(rit: RitResource, commit: Commit):
   If the current rit directory isn't clean and isn't the parent of the commit
   being applied, the results will not be the contents of commit.
 
-  See hard_reset.
+  See restore_to_commit.
   '''
   logger.info("Applying commit: %s", commit.commit_id)
   tar_file = get_tar_path(rit, commit.commit_id)
@@ -663,20 +677,15 @@ def apply_commit(rit: RitResource, commit: Commit):
   if exit_code != 0:
     raise RitError("Failed while trying to apply commit: %s", commit.commit_id)
 
-def hard_reset(rit: RitResource, commit: Commit, force: bool):
+def restore_to_commit(rit: RitResource, commit: Commit):
   '''
-  This is technically wrong since if head is a branch it should move too, but it
-  doesn't.
+  This gets the chain of commits from commit to root and applies them. If there
+  are changes in the working directory relative to current head, then those will
+  be destroyed.
 
-  This gets the chain of commits from commit to root and applies them. It will
-  also check that the current working directory is clean so that we know no data
-  is lost. If the working tree is dirty, then force needs to be set to True to
-  forcibly delete these changes.
+
   '''
   logger.debug('resetting to %s', commit.commit_id)
-
-  if not force and status_tar(rit, False):
-    raise RitError("Uncommitted changes! Commit them or use -f to destroy them.")
 
   commit_chain = [commit]
   while commit.parent_commit_id is not None:
@@ -1012,7 +1021,26 @@ def status_head(rit: RitResource):
   if not status_tar(rit, True):
     logger.info("Clean working directory!")
 
-''' API '''
+'''
+API
+
+You should be able to do anything you want with these functions.
+'''
+
+def query(*, root_rit_dir: str):
+  '''
+  Return a read only RitResource used for querying the rit directory. Mutating
+  the rit directory in any way invalidates this resource instance. Be sure to
+  call rit.clear() or call this function for a new one.
+
+  CLI users get information via stdout. That's not helpful to for python users,
+  so they instead get access to the full data structure.
+
+  For advanced users who want write access to the rit directory, construct a
+  RitResource directly with prevent_mutations set to False and read the class'
+  docs.
+  '''
+  return RitResource(root_rit_dir, prevent_mutations=True)
 
 def init(*, root_rit_dir: str):
   logger.debug("init")
@@ -1037,16 +1065,52 @@ def reset(*, root_rit_dir: str, ref: str, hard: bool):
   the branch. If head is a commit, it just moves head to the new commit. If it's
   a hard reset, then post moving head, the working changes are removed.
 
-  In git world, reset with no args is --mixed. The difference between --mixed
-  and --soft has to do with staged changes. Here, we don't have staged changes,
-  so --soft and --mixed are effectively the same. For that reason, here, we just
-  --refer to that as a normal reset (as opposed to hard).
+  Here, a non hard reset is effectively the same as git's reset with no
+  arguments. In git, a reset with no args is --mixed, and since we don't have
+  staged changes, --mixed and --soft are the same in this context.  For that
+  reason, here, we just use the terminology reset instead of soft reset or mixed
+  reset.
   '''
-  pass
+  logger.debug('reset')
+  logger.debug('  ref: %s', ref)
+  logger.debug('  hard: %s', hard)
+  check_types(
+    ref = (ref, exact_t(str)),
+    hard = (hard, exact_t(bool)),
+  )
+
+  rit = RitResource(root_rit_dir)
+  res = resolve_ref(rit, ref)
+
+  if res.head is not None:
+    raise RitError("Attempted to reset to head")
+  elif res.commit is None:
+    raise RitError("Unable to resolve ref to commit: %s", ref)
+  commit = res.commit
+
+  head = copy.copy(rit.head)
+  if res.branch is not None:
+    head.branch_name = res.branch.name
+    head.commit_id = None
+  else:
+    head.branch_name = None
+    head.commit_id = commit.commit_id
+  rit.set_head(head)
+
+  if hard:
+    restore_to_commit(rit, commit)
+
+  logger.info("Successful reset. Commit this checkout to get a clean rit status.")
+  return res
+
 
 def checkout(*, root_rit_dir: str, ref: str, force: bool):
   '''
   Checkout ref (overwriting any changes if force is True).
+
+  It will also check that the current working directory is clean so that we know
+  no data is lost. If the working tree is dirty, then force needs to be set to
+  True to forcibly delete these changes.
 
   Returns ref resolved, as a ResolvedRef.
 
@@ -1065,7 +1129,7 @@ def checkout(*, root_rit_dir: str, ref: str, force: bool):
   logger.debug('  ref: %s', ref)
   logger.debug('  force: %s', force)
   check_types(
-    ref = (ref, optional_t(exact_t(str))),
+    ref = (ref, exact_t(str)),
     force = (force, exact_t(bool)),
   )
 
@@ -1079,7 +1143,10 @@ def checkout(*, root_rit_dir: str, ref: str, force: bool):
 
   head_commit_id = rit.get_head_commit_id()
   if head_commit_id is not None and head_commit_id != commit.commit_id:
-    hard_reset(rit, commit, force)
+    if not force and status_tar(rit, False):
+      raise RitError("Uncommitted changes! Commit them or use -f to destroy them.")
+    restore_to_commit(rit, commit)
+
   head = copy.copy(rit.head)
   if res.branch is not None:
     head.branch_name = res.branch.name
@@ -1177,27 +1244,6 @@ def prune(*, root_rit_dir: str):
 
   rit = RitResource(root_rit_dir)
   raise NotImplementedError()
-
-def reroot(*, root_rit_dir: str):
-  # Move the root to the latest common ancestor of all branches
-  logger.debug('reroot')
-
-  rit = RitResource(root_rit_dir)
-  raise NotImplementedError()
-
-''' PYTHON ONLY API '''
-
-def info(*, root_rit_dir: str, refs: list[str], all: bool):
-  logger.debug('info')
-  logger.debug('  refs: %s', refs)
-  logger.debug('  all: %s', all)
-  check_types(
-    refs = (refs, list_t(exact_t(str))),
-    all = (all, exact_t(bool)),
-  )
-
-  rit = RitResource(root_rit_dir)
-  return info_refs(rit, refs, all)
 
 ''' ARG HANDLERS '''
 
