@@ -1088,8 +1088,6 @@ def branch(*, root_rit_dir: str, name: Optional[str], ref: Optional[str], force:
 
   if name is not None:
     validate_branch_name(name)
-    if rit.head.branch_name is not None and rit.head.branch_name == name:
-      raise RitError("Unable to set commit of head branch.")
 
   if delete:
     if force:
