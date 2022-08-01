@@ -1092,14 +1092,11 @@ def reset(*, root_rit_dir: str, ref: str, hard: bool):
     raise RitError("Unable to resolve ref to commit: %s", ref)
   commit = res.commit
 
-  head = copy.copy(rit.head)
   if res.branch is not None:
-    head.branch_name = res.branch.name
-    head.commit_id = None
+    new_head = HeadNode(branch_name = res.branch.name)
   else:
-    head.branch_name = None
-    head.commit_id = commit.commit_id
-  rit.set_head(head)
+    new_head = HeadNode(commit_id = commit.commit_id)
+  rit.set_head(new_head)
 
   if hard:
     restore_to_commit(rit, commit)
@@ -1150,14 +1147,11 @@ def checkout(*, root_rit_dir: str, ref: str, force: bool):
       raise RitError("Uncommitted changes! Commit them or use -f to destroy them.")
     restore_to_commit(rit, commit)
 
-  head = copy.copy(rit.head)
   if res.branch is not None:
-    head.branch_name = res.branch.name
-    head.commit_id = None
+    new_head = HeadNode(branch_name = res.branch.name)
   else:
-    head.branch_name = None
-    head.commit_id = commit.commit_id
-  rit.set_head(head)
+    new_head = HeadNode(commit_id = commit.commit_id)
+  rit.set_head(new_head)
 
   logger.info("Successful checkout. Commit this checkout to get a clean rit status.")
   return res
