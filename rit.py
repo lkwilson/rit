@@ -567,12 +567,14 @@ def status_tar(rit: RitResource, verbose: bool):
   work_snar = os.path.join(rit.paths.work, 'ref.snar')
   if parent_commit_id is not None:
     head_snar = get_snar_path(rit, parent_commit_id)
+    # TODO: move into rit resource
     shutil.copyfile(head_snar, work_snar)
 
   check_tar()
   tar_cmd = ['tar', '-cvg', work_snar, f'--exclude={rit_dir_name}', '-f', os.devnull, '.']
   logger.debug("Running tar command: %s", tar_cmd)
 
+  # TODO: move into rit resource
   process = subprocess.Popen(tar_cmd, cwd=rit.paths.root, stdout=subprocess.PIPE)
   terminated = False
   dirty = False
@@ -623,6 +625,7 @@ def create_commit(rit: RitResource, create_time: float, msg: str):
   if parent_commit_id is not None:
     head_snar = get_snar_path(rit, parent_commit_id)
     logger.debug("Copying previous snar: %s", head_snar)
+    # TODO: move into rit resource
     shutil.copyfile(head_snar, work_snar)
   else:
     logger.debug("Using fresh snar file since no parent commit")
@@ -634,6 +637,7 @@ def create_commit(rit: RitResource, create_time: float, msg: str):
   opts += 'g'
   tar_cmd = ['tar', opts, work_snar, f'--exclude={rit_dir_name}', '-f', work_tar, '.']
   logger.debug("Running tar command: %s", tar_cmd)
+  # TODO: move into rit resource
   process = subprocess.Popen(tar_cmd, cwd=rit.paths.root)
   # TODO: doesn't forward SIGTERM, only SIGINT
   exit_code = process.wait()
@@ -674,6 +678,7 @@ def apply_commit(rit: RitResource, commit: Commit):
   logger.info("Applying commit: %s", commit.commit_id)
   tar_file = get_tar_path(rit, commit.commit_id)
   tar_cmd = ['tar', '-xg', os.devnull, '-f', tar_file]
+  # rit resource thing?
   process = subprocess.Popen(tar_cmd, cwd=rit.paths.root)
   exit_code = process.wait()
   if exit_code != 0:
