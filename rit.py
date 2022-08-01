@@ -176,9 +176,12 @@ class RitResource:
   All interactions with the rit directory should go through this object.
 
   Any external changes to the rit directory invalidate's this object's cache and
-  in that case, clear should be called. However, no user of this resource
-  should be calling clear. Instead this class' api should be extended and that
-  new method should call clear.
+  in that case, _clear should be called. However, no user of this resource
+  should be calling _clear. Instead this class' api should be extended and that
+  new method should call _clear.
+
+  TODO: ensure all mutations of the rit directory are through this object, e.g.,
+  tar creation / deletion.
   '''
 
   root_rit_dir: str
@@ -235,7 +238,7 @@ class RitResource:
     except FileExistsError:
       raise RitError("The rit directory already exists: %s", self.paths.rit_dir)
 
-  def clear(self):
+  def _clear(self):
     ''' If the rit directory is modified, then the cache must be cleared '''
     cleared_rit = RitResource(self.root_rit_dir)
     self._head = cleared_rit._head
@@ -254,21 +257,21 @@ class RitResource:
     if self.prevent_mutations:
       raise RitError("Doing this would mutate the rit directory, and that is disabled for this RitResource")
     self._write_commit(commit)
-    self.clear()
+    self._clear()
 
   def set_branch(self, branch: Branch):
     ''' add the branch to the rit dir '''
     if self.prevent_mutations:
       raise RitError("Doing this would mutate the rit directory, and that is disabled for this RitResource")
     self._write_branch(branch)
-    self.clear()
+    self._clear()
 
   def set_head(self, head: HeadNode):
     ''' set the new head point '''
     if self.prevent_mutations:
       raise RitError("Doing this would mutate the rit directory, and that is disabled for this RitResource")
     self._write_head(head)
-    self.clear()
+    self._clear()
 
   ''' GET '''
 
@@ -650,11 +653,10 @@ def create_commit(rit: RitResource, create_time: float, msg: str):
   commit = Commit(parent_commit_id, commit_id, create_time, msg)
   rit.add_commit(commit)
   if rit.head.commit_id is not None:
-    head = copy.copy(rit.head)
-    head.commit_id = commit_id
-    rit.set_head(head)
+    new_head = HeadNode(commit_id=commit_id, branch_name=None)
+    rit.set_head(new_head)
   else:
-    rit.set_branch(Branch(head.branch_name, commit_id))
+    rit.set_branch(Branch(rit.head.branch_name, commit_id))
   return commit
 
 
@@ -800,6 +802,22 @@ def resolve_ref(rit: RitResource, ref: Optional[str]):
     else:
       res.commit = resolve_commit(rit, ref)
   return res
+
+def resolve_refs(rit: RitResource, refs: list[str], all: bool):
+  '''
+  Returns information regarding the provided refs
+  '''
+  resolved_refs: list[ResolvedRef] = []
+
+  if not refs:
+    refs.append(None)
+  if all:
+    refs.extend(rit.get_branch_names())
+  for ref in refs:
+    res = resolve_ref(rit, ref)
+    resolved_refs.append(res)
+
+  return resolved_refs
 
 branch_name_re = re.compile('^\\w+$')
 def validate_branch_name(name: str):
@@ -1012,9 +1030,7 @@ You should be able to do anything you want with these functions.
 
 def query(*, root_rit_dir: str):
   '''
-  Return a read only RitResource used for querying the rit directory. Mutating
-  the rit directory in any way invalidates this resource instance. Be sure to
-  call rit.clear() or call this function for a new one.
+  Return a read only RitResource used for querying the rit directory.
 
   CLI users get information via stdout. That's not helpful to for python users,
   so they instead get access to the full data structure.
@@ -1085,7 +1101,6 @@ def reset(*, root_rit_dir: str, ref: str, hard: bool):
 
   logger.info("Successful reset. Commit this checkout to get a clean rit status.")
   return res
-
 
 def checkout(*, root_rit_dir: str, ref: str, force: bool):
   '''

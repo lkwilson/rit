@@ -2,7 +2,9 @@ import os
 import rit
 
 # public api
-from rit import init, commit, checkout, branch, log, show, status, reflog, prune
+from rit import init, commit, checkout, branch, log, show, status, reflog, prune, query
+# advanced api
+from rit import resolve_refs
 
 def test_pprint_time_duration():
   min = 60
@@ -213,3 +215,52 @@ def test_python_api():
   assert commit_graph[head_commit_id] == second_commit.commit_id
   assert deviate_commit_id in commit_id_to_commit
   assert head_commit_id in commit_id_to_commit
+
+  def info(root_rit_dir, refs, all):
+    rit = query(root_rit_dir=root_rit_dir)
+    resolved_refs = resolve_refs(rit, refs, all)
+    commit_id_to_branch_names = rit.get_commit_id_to_branch_names()
+    return resolved_refs, commit_id_to_branch_names
+
+  refs, commit_id_to_branch_names = info(**base_kwargs, refs=[], all=False)
+  assert len(refs) == 1
+  assert refs[0].head is not None
+
+  refs, commit_id_to_branch_names = info(**base_kwargs, refs=[rit.head_ref_name], all=False)
+  assert len(refs) == 1
+  assert refs[0].head is not None
+
+  refs, commit_id_to_branch_names = info(**base_kwargs, refs=[rit.head_ref_name], all=True)
+  assert len(refs) == 7
+  assert refs[0].head is not None
+
+  refs, commit_id_to_branch_names = info(**base_kwargs, refs=[], all=True)
+  assert len(refs) == 7
+  assert refs[0].head is not None
+
+  refs, commit_id_to_branch_names = info(**base_kwargs, refs=['first_b'], all=True)
+  assert len(refs) == 7
+  assert refs[0].head is None
+  assert refs[0].branch.name == 'first_b'
+  assert refs[0].commit.commit_id == first_commit.commit_id
+
+  refs, commit_id_to_branch_names = info(**base_kwargs, refs=['first_b', 'third_b'], all=True)
+  assert len(refs) == 8
+  assert refs[0].head is None
+  assert refs[0].branch.name == 'first_b'
+  assert refs[0].commit.commit_id == first_commit.commit_id
+  assert refs[1].head is None
+  assert refs[1].branch.name == 'third_b'
+  assert refs[1].commit.commit_id == third_commit.commit_id
+
+  for ref in refs:
+    if ref.branch is not None:
+      assert ref.commit.commit_id in commit_id_to_branch_names
+    else:
+      assert ref.commit.commit_id not in commit_id_to_branch_names
+
+  refs, commit_id_to_branch_names = info(**base_kwargs, refs=['first_b'], all=False)
+  assert len(refs) == 1
+  assert refs[0].head is None
+  assert refs[0].branch.name == 'first_b'
+  assert refs[0].commit.commit_id == first_commit.commit_id
