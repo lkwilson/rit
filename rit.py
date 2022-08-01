@@ -3,7 +3,6 @@
 from io import DEFAULT_BUFFER_SIZE
 import subprocess
 import shutil
-import copy
 import argparse
 import datetime
 import hashlib
@@ -145,6 +144,7 @@ class HeadNode:
 
   branch_name: Optional[str] = None
   ''' the current head is tied to this branch. new commits move the branch. '''
+  # TODO: ensure that branch_name can not exist and that doesn't break anything
 
   def __post_init__(self):
     check_obj_types(self, dict(
@@ -482,6 +482,11 @@ def mkdir(*args, exists_ok=False, **kwargs):
     if not exists_ok:
       raise
 
+def none_t():
+  def none_type(obj):
+    return obj is None
+  return none_type
+
 def exact_t(*types):
   def exact_type(obj):
     return isinstance(obj, types)
@@ -612,7 +617,6 @@ def status_tar(rit: RitResource, verbose: bool):
 
 def create_commit(rit: RitResource, create_time: float, msg: str):
   ''' create a commit with the current head as the parent commit (if any) '''
-  head = rit.head
   parent_commit_id = rit.get_head_commit_id()
   logger.debug("Parent ref: %s", parent_commit_id)
 
@@ -1104,7 +1108,7 @@ def reset(*, root_rit_dir: str, ref: str, hard: bool):
   logger.info("Successful reset. Commit this checkout to get a clean rit status.")
   return res
 
-def checkout(*, root_rit_dir: str, ref: str, force: bool):
+def checkout_ref(*, root_rit_dir: str, ref: str, force: bool):
   '''
   Checkout ref (overwriting any changes if force is True).
 
@@ -1125,7 +1129,7 @@ def checkout(*, root_rit_dir: str, ref: str, force: bool):
   - set head to ref
   - hard reset to new head
   '''
-  logger.debug('checkout')
+  logger.debug('checkout_ref')
   logger.debug('  ref: %s', ref)
   logger.debug('  force: %s', force)
   check_types(
@@ -1156,6 +1160,48 @@ def checkout(*, root_rit_dir: str, ref: str, force: bool):
   logger.info("Successful checkout. Commit this checkout to get a clean rit status.")
   return res
 
+def checkout_orphan(*,
+      root_rit_dir: str,
+      name: str):
+  '''
+  Move head to point at branch with name name. Ensures that name doesn't already
+  exist. This results in the head not pointing to any commit. Next commit will
+  create a new branch.
+  '''
+  logger.debug('checkout_orphan')
+  logger.debug('  name: %s', name)
+  check_types(
+    name = (name, optional_t(exact_t(str))),
+  )
+
+  validate_branch_name(name)
+
+  rit = RitResource(root_rit_dir)
+  if rit.is_branch(name):
+    raise RitError("Orphan checkout failed because branch already exists.")
+  new_head = HeadNode(branch_name=name)
+  rit.set_head(new_head)
+
+def checkout(*, root_rit_dir: str, orphan: bool, ref_or_name: str, force: Optional[bool]):
+  '''
+  Forwards to checkout_ref or checkout_orphan
+  '''
+  logger.debug('checkout')
+  logger.debug('  orphan: %s', orphan)
+  logger.debug('  ref_or_name: %s', ref_or_name)
+  logger.debug('  force: %s', force)
+  check_types(
+    orphan = (orphan, exact_t(bool)),
+    ref_or_name = (ref_or_name, exact_t(str)),
+  )
+  if orphan:
+    check_types(
+      force = (force, none_t(bool)),
+    )
+    return checkout_orphan(root_rit_dir=root_rit_dir, name=ref_or_name)
+  else:
+    return checkout_ref(root_rit_dir=root_rit_dir, ref=ref_or_name, force=force)
+
 def branch(*, root_rit_dir: str, name: Optional[str], ref: Optional[str], force: bool, delete: bool):
   '''
   ref is a ref name or commit id or head_ref_name
@@ -1175,10 +1221,10 @@ def branch(*, root_rit_dir: str, name: Optional[str], ref: Optional[str], force:
     delete = (delete, exact_t(bool)),
   )
 
-  rit = RitResource(root_rit_dir)
-
   if name is not None:
     validate_branch_name(name)
+
+  rit = RitResource(root_rit_dir)
 
   if delete:
     if force:
@@ -1231,15 +1277,11 @@ def status(*, root_rit_dir: str):
 
 def reflog(*, root_rit_dir: str):
   logger.debug('reflog')
-
-  rit = RitResource(root_rit_dir)
   raise NotImplementedError()
 
 def prune(*, root_rit_dir: str):
   # Prune lost branches
   logger.debug('prune')
-
-  rit = RitResource(root_rit_dir)
   raise NotImplementedError()
 
 ''' ARG HANDLERS '''
@@ -1257,7 +1299,8 @@ def commit_main(argv, prog):
 
 def checkout_main(argv, prog):
   parser = argparse.ArgumentParser(description="Log the current commit history", prog=prog)
-  parser.add_argument('ref', help="The ref to checkout")
+  parser.add_argument('ref_or_name', help="The ref to checkout. If --orphan set, the name of the orphaned branch.")
+  parser.add_argument('--orphan', action='store_true', help="Move head to a branch with no name")
   parser.add_argument('-f', '--force', action='store_true', help="If there are uncommitted changes, automatically remove them.")
   args = parser.parse_args(argv)
   checkout(root_rit_dir=os.getcwd(), **vars(args))

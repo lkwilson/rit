@@ -2,7 +2,7 @@ import os
 import rit
 
 # public api
-from rit import init, commit, checkout, branch, log, show, status, reflog, prune, query
+from rit import init, commit, reset, checkout, branch, log, show, status, reflog, prune, query
 # advanced api
 from rit import resolve_refs
 
@@ -70,20 +70,20 @@ def test_python_api():
   third_commit = commit(**base_kwargs, msg="third")
 
   # can you checkout files?
-  ref = checkout(**base_kwargs, ref=first_commit.commit_id, force=False)
+  ref = checkout(**base_kwargs, orphan=False, ref_or_name=first_commit.commit_id, force=False)
   assert ref.commit.commit_id == first_commit.commit_id
 
   # dirty dir prevents checkout
   fourth_file = os.path.join(root_rit_dir, 'fourth')
   touch(fourth_file)
   try:
-    checkout(**base_kwargs, ref=second_commit.commit_id, force=False)
+    checkout(**base_kwargs, orphan=False, ref_or_name=second_commit.commit_id, force=False)
     assert False
   except rit.RitError:
     pass
 
   # force checkout ignores dirty dir
-  ref = checkout(**base_kwargs, ref=third_commit.commit_id, force=True)
+  ref = checkout(**base_kwargs, orphan=False, ref_or_name=third_commit.commit_id, force=True)
   curr_head = ref
   assert ref.commit.commit_id == third_commit.commit_id
   # file is gone, restore / checkout complete
@@ -134,7 +134,7 @@ def test_python_api():
   assert head.branch_name is None
   assert set(all_branches) == expected_all_branches
 
-  checkout(**base_kwargs, ref='third_b', force=False)
+  checkout(**base_kwargs, orphan=False, ref_or_name='third_b', force=False)
   branch_res = branch(**base_kwargs, name=None, ref=None, force=False, delete=False)
   assert isinstance(branch_res, tuple)
   head, all_branches = branch_res
@@ -153,12 +153,12 @@ def test_python_api():
 
   assert status(**base_kwargs) is None
 
-  checkout(**base_kwargs, ref=second_commit.commit_id, force=True)
+  checkout(**base_kwargs, orphan=False, ref_or_name=second_commit.commit_id, force=True)
   branch_res = branch(**base_kwargs, name='deviate', ref=None, force=False, delete=False)
   assert branch_res.commit.commit_id == second_commit.commit_id
-  checkout(**base_kwargs, ref='deviate', force=False)
+  checkout(**base_kwargs, orphan=False, ref_or_name='deviate', force=False)
   deviate_commit = commit(**base_kwargs, msg="deviation")
-  checkout(**base_kwargs, ref='third_b', force=False)
+  checkout(**base_kwargs, orphan=False, ref_or_name='third_b', force=False)
 
   branch_res = branch(**base_kwargs, name=None, ref=None, force=False, delete=False)
   assert isinstance(branch_res, tuple)
@@ -215,6 +215,10 @@ def test_python_api():
   assert commit_graph[head_commit_id] == second_commit.commit_id
   assert deviate_commit_id in commit_id_to_commit
   assert head_commit_id in commit_id_to_commit
+
+  # TODO: test reset
+
+  # TODO: test checkout --orphan: checkout(**base_kwargs, orphan=False, force=None, ref_or_name=..)
 
   def info(root_rit_dir, refs, all):
     rit = query(root_rit_dir=root_rit_dir)
