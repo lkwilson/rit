@@ -1196,7 +1196,7 @@ def checkout(*, root_rit_dir: str, orphan: bool, ref_or_name: str, force: Option
   )
   if orphan:
     check_types(
-      force = (force, none_t(bool)),
+      force = (force, none_t()),
     )
     return checkout_orphan(root_rit_dir=root_rit_dir, name=ref_or_name)
   else:
@@ -1303,7 +1303,10 @@ def checkout_main(argv, prog):
   parser.add_argument('--orphan', action='store_true', help="Move head to a branch with no name")
   parser.add_argument('-f', '--force', action='store_true', help="If there are uncommitted changes, automatically remove them.")
   args = parser.parse_args(argv)
-  checkout(root_rit_dir=os.getcwd(), **vars(args))
+  kwargs = vars(args)
+  if kwargs['orphan']:
+    kwargs['force'] = None
+  checkout(root_rit_dir=os.getcwd(), **kwargs)
 
 def branch_main(argv, prog):
   parser = argparse.ArgumentParser(description="Create a new branch", prog=prog)
