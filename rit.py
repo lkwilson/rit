@@ -144,7 +144,6 @@ class HeadNode:
 
   branch_name: Optional[str] = None
   ''' the current head is tied to this branch. new commits move the branch. '''
-  # TODO: ensure that branch_name can not exist and that doesn't break anything
 
   def __post_init__(self):
     check_obj_types(self, dict(
@@ -942,6 +941,7 @@ def list_branches(rit: RitResource):
   head = rit.head
   head_branch_name = head.branch_name
   branch_names = rit.get_branch_names()
+  # TODO: this doesn't handle HEAD well if its commitless
   for branch_name in branch_names:
     this_sym = '*' if branch_name == head_branch_name else ' '
     branch = rit.get_branch(branch_name, ensure=True)
@@ -987,6 +987,7 @@ def log_refs(rit: RitResource, refs: list[str], all: bool, full: bool):
     res = resolve_ref(rit, ref)
     if res.commit is None:
       if res.head is not None:
+        # TODO: this doesn't handle HEAD well if its commitless
         raise RitError("head branch doesn't have any commits")
       else:
         raise RitError("Unable to locate ref: %s", ref)
