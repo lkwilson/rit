@@ -94,6 +94,34 @@ python "$rit_bin" "$@" checkout base -f || bad
 [ -f bb ] && bad
 [ -f aa ] && bad
 
+# checkout --orphan
+python "$rit_bin" "$@" checkout --orphan basic_reset || bad
+python "$rit_bin" "$@" checkout basic_reset && bad
+python "$rit_bin" "$@" commit "Reset to only have one commit" || bad
+python "$rit_bin" "$@" checkout basic_reset || bad
+touch ddd
+python "$rit_bin" "$@" commit "Add ddd" || bad
+python "$rit_bin" "$@" branch orph_bak || bad
+
+python "$rit_bin" "$@" reset base || bad
+[ -f ddd ] || bad
+python "$rit_bin" "$@" checkout base || bad
+[ -f ddd ] || bad
+python "$rit_bin" "$@" checkout basic_reset || bad
+[ -f ddd ] || bad
+python "$rit_bin" "$@" checkout first && bad
+[ -f ddd ] || bad
+python "$rit_bin" "$@" checkout basic_reset || bad
+[ -f ddd ] || bad
+python "$rit_bin" "$@" reset orph_bak || bad
+[ -f ddd ] || bad
+python "$rit_bin" "$@" checkout basic_reset || bad
+[ -f ddd ] || bad
+python "$rit_bin" "$@" checkout orph_bak || bad
+[ -f ddd ] || bad
+python "$rit_bin" "$@" checkout first || bad
+[ -f ddd ] && bad
+
 set +x
 
 echo "All tests succeeded!"

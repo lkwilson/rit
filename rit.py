@@ -117,11 +117,6 @@ class Branch:
   commit_id: str
   ''' the commit id tied to the branch '''
 
-  info: str = ''
-  '''
-  Eventually, this'll store something like where the full backup archive is.
-  '''
-
   def __post_init__(self):
     check_obj_types(self, dict(
       name = exact_t(str),
@@ -1068,7 +1063,7 @@ def commit(*, root_rit_dir, msg: str):
   logger.info("Created commit %s: %s", commit.commit_id[:short_hash_index], commit.msg)
   return commit
 
-def reset(*, root_rit_dir: str, ref: str, hard: bool):
+def reset(*, root_rit_dir: str, ref: Optional[str], hard: bool):
   '''
   A reset tries to move the head to ref. If head is a branch, it instead moves
   the branch. If head is a commit, it just moves head to the new commit. If it's
@@ -1084,29 +1079,36 @@ def reset(*, root_rit_dir: str, ref: str, hard: bool):
   logger.debug('  ref: %s', ref)
   logger.debug('  hard: %s', hard)
   check_types(
-    ref = (ref, exact_t(str)),
+    ref = (ref, optional_t(exact_t(str))),
     hard = (hard, exact_t(bool)),
   )
 
   rit = RitResource(root_rit_dir)
   res = resolve_ref(rit, ref)
 
-  if res.head is not None:
-    raise RitError("Attempted to reset to head")
-  elif res.commit is None:
+  if res.commit is None:
     raise RitError("Unable to resolve ref to commit: %s", ref)
-  commit = res.commit
 
-  if res.branch is not None:
-    new_head = HeadNode(branch_name = res.branch.name)
+  if rit.head.branch_name is not None:
+    branch = rit.get_branch(rit.head.branch_name, ensure=False)
+    if branch is None:
+      branch = Branch(rit.head.branch_name, res.commit.commit_id)
+    else:
+      branch.commit_id = res.commit.commit_id
+    rit.set_branch(branch)
   else:
-    new_head = HeadNode(commit_id = commit.commit_id)
-  rit.set_head(new_head)
+    new_head = HeadNode(commit_id = res.commit.commit_id)
+    rit.set_head(new_head)
 
   if hard:
-    restore_to_commit(rit, commit)
+    restored = True
+    restore_to_commit(rit, res.commit)
 
-  logger.info("Successful reset. Commit this checkout to get a clean rit status.")
+  if restored:
+    logger.info("Successful reset. Commit this checkout to get a clean rit status.")
+  else:
+    logger.info("Successful reset")
+
   return res
 
 def checkout_ref(*, root_rit_dir: str, ref: str, force: bool):
@@ -1146,10 +1148,12 @@ def checkout_ref(*, root_rit_dir: str, ref: str, force: bool):
     raise RitError("Unable to resolve ref to commit: %s", ref)
   commit = res.commit
 
+  restored = False
   head_commit_id = rit.get_head_commit_id()
   if head_commit_id is not None and head_commit_id != commit.commit_id:
     if not force and status_tar(rit, False):
       raise RitError("Uncommitted changes! Commit them or use -f to destroy them.")
+    restored = True
     restore_to_commit(rit, commit)
 
   if res.branch is not None:
@@ -1158,7 +1162,11 @@ def checkout_ref(*, root_rit_dir: str, ref: str, force: bool):
     new_head = HeadNode(commit_id = commit.commit_id)
   rit.set_head(new_head)
 
-  logger.info("Successful checkout. Commit this checkout to get a clean rit status.")
+  if restored:
+    logger.info("Successful checkout. Commit this checkout to get a clean rit status.")
+  else:
+    logger.info("Switched to new ref")
+
   return res
 
 def checkout_orphan(*,
@@ -1309,6 +1317,13 @@ def checkout_main(argv, prog):
     kwargs['force'] = None
   checkout(root_rit_dir=os.getcwd(), **kwargs)
 
+def reset_main(argv, prog):
+  parser = argparse.ArgumentParser(description="Log the current commit history", prog=prog)
+  parser.add_argument('ref', nargs='?', help="The ref to reset head to")
+  parser.add_argument('--hard', action='store_true', help="Apply the target commits upon reset")
+  args = parser.parse_args(argv)
+  reset(root_rit_dir=os.getcwd(), **vars(args))
+
 def branch_main(argv, prog):
   parser = argparse.ArgumentParser(description="Create a new branch", prog=prog)
   parser.add_argument('name', nargs='?', help="The name of the branch to create. If omitted, lists all branches.")
@@ -1341,6 +1356,7 @@ command_handlers = dict(
   init = init_main,
   commit = commit_main,
   checkout = checkout_main,
+  reset = reset_main,
   branch = branch_main,
   show = show_main,
   status = status_main,
