@@ -225,16 +225,30 @@ def show(*, ref: Optional[str]): pass
 def status(): pass
 # def reflog(): pass
 # def prune(): pass
-# def reroot(): pass
 ```
 
-# TODO
+# Differences
+As a result of being a subset of git:
+- No concept of staged / indexed changes.
+- Soft and mixed resetting are the same thing here.
+Some deviations are made since we don't have the same limitations as git.
+- You can forcibly move a branch that head points to.
 
-- You can't sigterm rit or it may leave stray tar processes lying around.
+# Development
+Contributions welcome!
+## How to test
+- You can import `rit.py` and use the python api.
+- You can run `rit.py` directly. 
+- You can run the helper script in bin.
+- You can add bin to your PATH, and run `rit`.
+## TODO
+- You can't sigterm rit or it may leave stray tar processes lying around. We
+  currently rely on signal forwarding to the process group, which only works for
+  ctrl C / SIGINT
+- Make it asyncio based (which solves the previous item)
 - No pruning of untracked commits, those that are not part of a branch tree.
-- No squashing of historical commits
-- Only stores a single full backup which can be risky
-- No `checkout -b`
 - `rit branch` with no commits doesn't warn me of anything
 - `rit log --full` doesn't do anything
 - See NotImplementedError's at the bottom of rit.py
+### Nice to haves:
+- No `checkout -b`
