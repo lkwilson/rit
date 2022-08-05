@@ -1051,7 +1051,7 @@ def init(*, root_rit_dir: str):
   rit = RitResource(root_rit_dir)
   rit.initialize()
 
-def commit(*, root_rit_dir, msg: str):
+def commit(*, root_rit_dir: str, msg: str):
   logger.debug('commit')
   logger.debug('  msg: %s', msg)
   check_types(
@@ -1100,6 +1100,7 @@ def reset(*, root_rit_dir: str, ref: Optional[str], hard: bool):
     new_head = HeadNode(commit_id = res.commit.commit_id)
     rit.set_head(new_head)
 
+  restored = False
   if hard:
     restored = True
     restore_to_commit(rit, res.commit)

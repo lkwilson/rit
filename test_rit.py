@@ -1,10 +1,9 @@
 import os
-import rit
 
 # public api
 from rit import init, commit, reset, checkout, branch, log, show, status, reflog, prune, query
 # advanced api
-from rit import resolve_refs
+import rit
 
 def test_pprint_time_duration():
   min = 60
@@ -216,14 +215,10 @@ def test_python_api():
   assert deviate_commit_id in commit_id_to_commit
   assert head_commit_id in commit_id_to_commit
 
-  # TODO: test reset
-
-  # TODO: test checkout --orphan: checkout(**base_kwargs, orphan=False, force=None, ref_or_name=..)
-
   def info(root_rit_dir, refs, all):
-    rit = query(root_rit_dir=root_rit_dir)
-    resolved_refs = resolve_refs(rit, refs, all)
-    commit_id_to_branch_names = rit.get_commit_id_to_branch_names()
+    rit_res = query(root_rit_dir=root_rit_dir)
+    resolved_refs = rit.resolve_refs(rit_res, refs, all)
+    commit_id_to_branch_names = rit_res.get_commit_id_to_branch_names()
     return resolved_refs, commit_id_to_branch_names
 
   refs, commit_id_to_branch_names = info(**base_kwargs, refs=[], all=False)
@@ -268,3 +263,257 @@ def test_python_api():
   assert refs[0].head is None
   assert refs[0].branch.name == 'first_b'
   assert refs[0].commit.commit_id == first_commit.commit_id
+
+  # assert that delete can't be set when orphaning
+  try:
+    checkout(**base_kwargs, orphan=True, ref_or_name='o_test', force=True)
+    assert False
+  except TypeError:
+    pass
+
+  try:
+    checkout(**base_kwargs, orphan=True, ref_or_name='o_test', force=False)
+    assert False
+  except TypeError:
+    pass
+
+  try:
+    checkout(**base_kwargs, orphan=True, ref_or_name=None, force=None)
+    assert False
+  except TypeError:
+    pass
+
+  checkout(**base_kwargs, orphan=True, ref_or_name='otest', force=None)
+
+  rit_res = query(**base_kwargs)
+  assert rit_res.head.branch_name == 'otest'
+  assert rit_res.head.commit_id is None
+  assert rit_res.get_branch('otest') is None
+
+  new_commit = commit(**base_kwargs, msg='Initial commit for otest')
+
+  # Verify no parents
+  assert new_commit.parent_commit_id is None
+
+  # get rit res
+  rit_res = query(**base_kwargs)
+
+  # verify commit id matches what was returned
+  new_commit_lookup = rit_res.get_commit(new_commit.commit_id, ensure=True)
+  assert new_commit_lookup.commit_id is not None
+  assert new_commit_lookup.commit_id == new_commit.commit_id
+  assert new_commit_lookup.parent_commit_id == new_commit.parent_commit_id
+  assert new_commit_lookup.create_time == new_commit.create_time
+  assert new_commit_lookup.msg == new_commit.msg
+  root_commit_id = new_commit_lookup.commit_id
+
+  # verify that head is still on branch
+  assert rit_res.head.branch_name == 'otest'
+  assert rit_res.head.commit_id is None
+
+  # verify that branch matches claimed commit
+  new_branch = rit_res.get_branch('otest')
+  assert new_branch is not None
+  assert new_branch.commit_id == new_commit.commit_id
+
+  # add files
+  branch(**base_kwargs, name="otest_root", ref=None, force=False, delete=False)
+  otest_a_file = os.path.join(root_rit_dir, 'otest_a')
+  touch(otest_a_file)
+  commit(**base_kwargs, msg="add a")
+  branch(**base_kwargs, name="otest_a", ref=None, force=False, delete=False)
+  otest_b_file = os.path.join(root_rit_dir, 'otest_b')
+  touch(otest_b_file)
+  top_commit = commit(**base_kwargs, msg="add b")
+  branch(**base_kwargs, name="otest_b", ref=None, force=False, delete=False)
+  otest_c_file = os.path.join(root_rit_dir, 'otest_c')
+  touch(otest_c_file)
+
+  rit_res = query(**base_kwargs)
+  assert rit_res.head.branch_name == 'otest'
+  otest_root_branch = rit_res.get_branch('otest_root')
+  assert otest_root_branch is not None
+  otest_a_branch = rit_res.get_branch('otest_a')
+  assert otest_a_branch is not None
+  otest_b_branch = rit_res.get_branch('otest_b')
+  assert otest_b_branch is not None
+  otest_branch = rit_res.get_branch('otest')
+  assert otest_branch is not None
+  assert otest_branch.commit_id == otest_b_branch.commit_id
+  assert top_commit.commit_id == otest_branch.commit_id
+
+  assert top_commit.parent_commit_id == otest_a_branch.commit_id
+  assert root_commit_id == rit_res.get_commit(otest_a_branch.commit_id, ensure=True).parent_commit_id
+
+  commit_chain = [root_commit_id, top_commit.parent_commit_id, top_commit.commit_id]
+
+  # make orphan and make sure changes are still there
+  checkout(**base_kwargs, orphan=True, ref_or_name='otest_2', force=None)
+
+  assert os.path.exists(otest_a_file)
+  assert os.path.exists(otest_b_file)
+  assert os.path.exists(otest_c_file)
+
+  checkout(**base_kwargs, orphan=True, ref_or_name='otest_3', force=None)
+
+  assert os.path.exists(otest_a_file)
+  assert os.path.exists(otest_b_file)
+  assert os.path.exists(otest_c_file)
+
+  # get rit res
+  rit_res = query(**base_kwargs)
+  assert rit_res.get_branch('otest_2') is None
+  assert rit_res.get_branch('otest_3') is None
+  assert rit_res.head.branch_name == 'otest_3'
+
+  reset(**base_kwargs, ref=commit_chain[0], hard=False)
+  rit_res = query(**base_kwargs)
+  assert rit_res.head.branch_name == 'otest_3'
+  assert rit_res.head.commit_id is None
+  this_branch = rit_res.get_branch('otest_3', ensure=True)
+  assert this_branch is not None
+  assert this_branch.commit_id == commit_chain[0]
+  assert os.path.exists(otest_a_file)
+  assert os.path.exists(otest_b_file)
+  assert os.path.exists(otest_c_file)
+
+  reset(**base_kwargs, ref=None, hard=False)
+  rit_res = query(**base_kwargs)
+  assert rit_res.get_branch('otest_2') is None
+  assert rit_res.head.branch_name == 'otest_3'
+
+  reset(**base_kwargs, ref=rit.head_ref_name, hard=False)
+  rit_res = query(**base_kwargs)
+  assert rit_res.get_branch('otest_2') is None
+  assert rit_res.head.branch_name == 'otest_3'
+
+  reset(**base_kwargs, ref=commit_chain[1], hard=False)
+  rit_res = query(**base_kwargs)
+  assert rit_res.head.branch_name == 'otest_3'
+  assert rit_res.head.commit_id is None
+  this_branch = rit_res.get_branch('otest_3', ensure=True)
+  assert this_branch is not None
+  assert this_branch.commit_id == commit_chain[1]
+  assert os.path.exists(otest_a_file)
+  assert os.path.exists(otest_b_file)
+  assert os.path.exists(otest_c_file)
+
+  reset(**base_kwargs, ref=None, hard=False)
+  rit_res = query(**base_kwargs)
+  assert rit_res.head.branch_name == 'otest_3'
+
+  reset(**base_kwargs, ref=rit.head_ref_name, hard=False)
+  rit_res = query(**base_kwargs)
+  assert rit_res.head.branch_name == 'otest_3'
+
+  reset(**base_kwargs, ref=commit_chain[2], hard=False)
+  rit_res = query(**base_kwargs)
+  assert rit_res.head.branch_name == 'otest_3'
+  assert rit_res.head.commit_id is None
+  this_branch = rit_res.get_branch('otest_3', ensure=True)
+  assert this_branch is not None
+  assert this_branch.commit_id == commit_chain[2]
+  assert os.path.exists(otest_a_file)
+  assert os.path.exists(otest_b_file)
+  assert os.path.exists(otest_c_file)
+
+  checkout(**base_kwargs, orphan=False, ref_or_name=commit_chain[2], force=False)
+  rit_res = query(**base_kwargs)
+  assert rit_res.head.branch_name is None
+  assert rit_res.head.commit_id == commit_chain[2]
+  reset(**base_kwargs, ref=commit_chain[0], hard=False)
+  rit_res = query(**base_kwargs)
+  assert rit_res.head.branch_name is None
+  assert rit_res.head.commit_id == commit_chain[0]
+  assert os.path.exists(otest_a_file)
+  assert os.path.exists(otest_b_file)
+  assert os.path.exists(otest_c_file)
+
+  reset(**base_kwargs, ref=None, hard=False)
+  rit_res = query(**base_kwargs)
+  assert rit_res.head.commit_id == commit_chain[0]
+
+  reset(**base_kwargs, ref=rit.head_ref_name, hard=False)
+  rit_res = query(**base_kwargs)
+  assert rit_res.head.commit_id == commit_chain[0]
+
+  reset(**base_kwargs, ref=commit_chain[2], hard=False)
+  rit_res = query(**base_kwargs)
+  assert rit_res.head.branch_name is None
+  assert rit_res.head.commit_id == commit_chain[2]
+  assert os.path.exists(otest_a_file)
+  assert os.path.exists(otest_b_file)
+  assert os.path.exists(otest_c_file)
+
+  reset(**base_kwargs, ref=commit_chain[0], hard=False)
+  rit_res = query(**base_kwargs)
+  assert rit_res.head.branch_name is None
+  assert rit_res.head.commit_id == commit_chain[0]
+  assert os.path.exists(otest_a_file)
+  assert os.path.exists(otest_b_file)
+  assert os.path.exists(otest_c_file)
+
+  reset(**base_kwargs, ref=commit_chain[2], hard=True)
+  rit_res = query(**base_kwargs)
+  assert rit_res.head.branch_name is None
+  assert rit_res.head.commit_id == commit_chain[2]
+  assert os.path.exists(otest_a_file)
+  assert os.path.exists(otest_b_file)
+  assert not os.path.exists(otest_c_file)
+
+  reset(**base_kwargs, ref=commit_chain[1], hard=True)
+  rit_res = query(**base_kwargs)
+  assert rit_res.head.branch_name is None
+  assert rit_res.head.commit_id == commit_chain[1]
+  assert os.path.exists(otest_a_file)
+  assert not os.path.exists(otest_b_file)
+  assert not os.path.exists(otest_c_file)
+
+  reset(**base_kwargs, ref=commit_chain[0], hard=True)
+  rit_res = query(**base_kwargs)
+  assert rit_res.head.branch_name is None
+  assert rit_res.head.commit_id == commit_chain[0]
+  assert not os.path.exists(otest_a_file)
+  assert not os.path.exists(otest_b_file)
+  assert not os.path.exists(otest_c_file)
+
+  reset(**base_kwargs, ref=commit_chain[1], hard=True)
+  rit_res = query(**base_kwargs)
+  assert rit_res.head.branch_name is None
+  assert rit_res.head.commit_id == commit_chain[1]
+  assert os.path.exists(otest_a_file)
+  assert not os.path.exists(otest_b_file)
+  assert not os.path.exists(otest_c_file)
+
+  reset(**base_kwargs, ref=commit_chain[2], hard=True)
+  rit_res = query(**base_kwargs)
+  assert rit_res.head.branch_name is None
+  assert rit_res.head.commit_id == commit_chain[2]
+  assert os.path.exists(otest_a_file)
+  assert os.path.exists(otest_b_file)
+  assert not os.path.exists(otest_c_file)
+
+  checkout(**base_kwargs, orphan=False, ref_or_name='otest_3', force=True)
+  reset(**base_kwargs, ref=commit_chain[2], hard=True)
+  rit_res = query(**base_kwargs)
+  assert rit_res.head.branch_name == 'otest_3'
+  assert rit_res.head.commit_id is None
+  assert os.path.exists(otest_a_file)
+  assert os.path.exists(otest_b_file)
+  assert not os.path.exists(otest_c_file)
+
+  reset(**base_kwargs, ref=commit_chain[1], hard=True)
+  rit_res = query(**base_kwargs)
+  assert rit_res.head.branch_name == 'otest_3'
+  assert rit_res.head.commit_id is None
+  assert os.path.exists(otest_a_file)
+  assert not os.path.exists(otest_b_file)
+  assert not os.path.exists(otest_c_file)
+
+  reset(**base_kwargs, ref=commit_chain[0], hard=True)
+  rit_res = query(**base_kwargs)
+  assert rit_res.head.branch_name == 'otest_3'
+  assert rit_res.head.commit_id is None
+  assert not os.path.exists(otest_a_file)
+  assert not os.path.exists(otest_b_file)
+  assert not os.path.exists(otest_c_file)
