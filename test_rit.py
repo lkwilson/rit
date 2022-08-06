@@ -1,7 +1,7 @@
 import os
 
 # public api
-from rit import init_cmd, commit_cmd, reset_cmd, checkout_cmd, branch_cmd, log_cmd, show_cmd, status_cmd, reflog_cmd, prune_cmd, query_cmd
+from rit import init_cmd, commit_cmd, reset_cmd, checkout_cmd, branch_cmd, log_cmd, show_cmd, status_cmd, prune_cmd, query_cmd
 # advanced api
 import rit
 
@@ -46,13 +46,6 @@ def test_python_api():
 
   # can you init?
   assert init_cmd(**base_kwargs) is None
-
-  # not implemented stuff
-  try:
-    reflog_cmd(**base_kwargs)
-    assert False
-  except NotImplementedError:
-    pass
 
   # can you commit files?
   touch(os.path.join(root_rit_dir, 'first'))
