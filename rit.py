@@ -1329,10 +1329,6 @@ def status_cmd(*, root_rit_dir: str):
   rit = RitResource(root_rit_dir)
   status_head(rit)
 
-def reflog_cmd(*, root_rit_dir: str):
-  logger.debug('reflog')
-  raise NotImplementedError()
-
 def prune_cmd(*, root_rit_dir: str):
   logger.debug('prune')
 
