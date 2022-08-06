@@ -1027,6 +1027,26 @@ def status_head(rit: RitResource):
   if not status_tar(rit, True):
     logger.info("Clean working directory!")
 
+def prune_commits(rit: RitResource):
+  ''' remove any commits not associated to a branch history '''
+  leaf_commits = set()
+  if rit.head.commit_id is not None:
+    leaf_commits.add(rit.head.commit_id)
+  for branch_name in rit.get_branch_names():
+    leaf_commits.add(rit.get_branch(branch_name, ensure=True).commit_id)
+
+  refed_commits = set(leaf_commits)
+  for leaf_commit in leaf_commits:
+    while True:
+      commit = rit.get_commit(leaf_commit, ensure=True)
+      if commit.parent_commit_id is None or commit.parent_commit_id in refed_commits:
+        break
+      refed_commits.add(commit.parent_commit_id)
+      leaf_commit = commit.parent_commit_id
+
+  # get all commits from file system not in refed_commits
+  # delete them
+
 '''
 API
 
@@ -1290,9 +1310,10 @@ def reflog(*, root_rit_dir: str):
   raise NotImplementedError()
 
 def prune(*, root_rit_dir: str):
-  # Prune lost branches
   logger.debug('prune')
-  raise NotImplementedError()
+
+  rit = RitResource(root_rit_dir)
+  prune_commits(rit)
 
 ''' ARG HANDLERS '''
 
@@ -1353,6 +1374,11 @@ def log_main(argv, prog):
   args = parser.parse_args(argv)
   log(root_rit_dir=os.getcwd(), **vars(args))
 
+def prune_main(argv, prog):
+  parser = argparse.ArgumentParser(description="Prune commits not part of a branch or head", prog=prog)
+  args = parser.parse_args(argv)
+  prune(root_rit_dir=os.getcwd(), **vars(args))
+
 command_handlers = dict(
   init = init_main,
   commit = commit_main,
@@ -1362,6 +1388,7 @@ command_handlers = dict(
   show = show_main,
   status = status_main,
   log = log_main,
+  prune = prune_main,
 )
 
 
