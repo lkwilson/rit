@@ -108,10 +108,21 @@ $ rit show
 I:      - ./b
 ```
 
+## checkout vs reset
+
+### `checkout`
+This will move what head points to (a branch or commit). If the target ref has a
+different commit than the current head, it will attempt to reset the directory
+to that point. If this destroys changes, then `--force` is required.
+
+### `reset`
+If head is a branch, it will move branch to point to target ref. It can also
+reset the directory to the target commit with a `--force` flag.
+
 ## All CLI Help Outputs
 ```
 $ python rit.py  --help
-usage: rit.py [--verbose] [--quiet] {init,commit,checkout,branch,show,status,log}
+usage: rit.py [--verbose] [--quiet] {init,commit,checkout,reset,branch,show,status,log,prune}
 rit.py: error: the following arguments are required: command
 ```
 
@@ -153,6 +164,20 @@ positional arguments:
 optional arguments:
   -h, --help   show this help message and exit
   -f, --force  If there are uncommitted changes, automatically remove them.
+```
+
+## `rit reset`
+```
+usage: rit.py reset [-h] [--hard] [ref]
+
+Log the current commit history
+
+positional arguments:
+  ref         The ref to reset head to
+
+optional arguments:
+  -h, --help  show this help message and exit
+  --hard      Apply the target commits upon reset
 ```
 
 ## `rit branch`
@@ -213,18 +238,31 @@ optional arguments:
   --full      Include more log data
 ```
 
+## `rit prune`
+```
+$ python rit.py prune --help
+usage: rit.py prune [-h]
+
+Prune commits not part of a branch or head
+
+optional arguments:
+  -h, --help  show this help message and exit
+```
+
 # Python API
 
 ```py
-def init(): pass
-def commit(*, msg: str): pass
-def checkout(*, ref: str, force: bool): pass
-def branch(*, name: Optional[str], ref: Optional[str], force: bool, delete: bool): pass
-def log(*, refs: list[str], all: bool, full: bool): pass
-def show(*, ref: Optional[str]): pass
-def status(): pass
-# def reflog(): pass
-# def prune(): pass
+def query_cmd(*, root_rit_dir: str): pass
+def init_cmd(*, root_rit_dir: str): pass
+def commit_cmd(*, root_rit_dir: str, msg: str): pass
+def reset_cmd(*, root_rit_dir: str, ref: Optional[str], hard: bool): pass
+def checkout_cmd(*, root_rit_dir: str, orphan: bool, ref_or_name: str, force: Optional[bool]): pass
+def branch_cmd(*, root_rit_dir: str, name: Optional[str], ref: Optional[str], force: bool, delete: bool): pass
+def log_cmd(*, root_rit_dir: str, refs: list[str], all: bool, full: bool): pass
+def show_cmd(*, root_rit_dir: str, ref: Optional[str]): pass
+def status_cmd(*, root_rit_dir: str): pass
+def reflog_cmd(*, root_rit_dir: str): pass
+def prune_cmd(*, root_rit_dir: str): pass
 ```
 
 # Differences
@@ -233,6 +271,7 @@ As a result of being a subset of git:
 - Soft and mixed resetting are the same thing here.
 Some deviations are made since we don't have the same limitations as git.
 - You can forcibly move a branch that head points to.
+- commit doesn't use `-m` flag: `commit "My commit message"` instead of `commit -m "My commit message"`
 
 # Development
 Contributions welcome!
@@ -241,14 +280,15 @@ Contributions welcome!
 - You can run `rit.py` directly. 
 - You can run the helper script in bin.
 - You can add bin to your PATH, and run `rit`.
+
 ## TODO
 - You can't sigterm rit or it may leave stray tar processes lying around. We
   currently rely on signal forwarding to the process group, which only works for
   ctrl C / SIGINT
-- Make it asyncio based (which solves the previous item)
-- No pruning of untracked commits, those that are not part of a branch tree.
+- Make it asyncio based (which also conveniently solves the previous item)
 - `rit branch` with no commits doesn't warn me of anything
 - `rit log --full` doesn't do anything
-- See NotImplementedError's at the bottom of rit.py
+
 ### Nice to haves:
 - No `checkout -b`
+- Require `checkout -m` to match git api
