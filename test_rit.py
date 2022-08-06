@@ -517,3 +517,5 @@ def test_python_api():
   assert not os.path.exists(otest_a_file)
   assert not os.path.exists(otest_b_file)
   assert not os.path.exists(otest_c_file)
+
+  # TODO: prune test

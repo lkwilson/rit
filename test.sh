@@ -122,6 +122,8 @@ python "$rit_bin" "$@" checkout orph_bak || bad
 python "$rit_bin" "$@" checkout first || bad
 [ -f ddd ] && bad
 
+# TODO: prune test
+
 set +x
 
 echo "All tests succeeded!"
