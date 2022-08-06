@@ -1,7 +1,7 @@
 import os
 
 # public api
-from rit import init, commit, reset, checkout, branch, log, show, status, reflog, prune, query
+from rit import init_cmd, commit_cmd, reset_cmd, checkout_cmd, branch_cmd, log_cmd, show_cmd, status_cmd, reflog_cmd, prune_cmd, query_cmd
 # advanced api
 import rit
 
@@ -45,153 +45,153 @@ def test_python_api():
   base_kwargs = dict(root_rit_dir=root_rit_dir)
 
   # can you init?
-  assert init(**base_kwargs) is None
+  assert init_cmd(**base_kwargs) is None
 
   # not implemented stuff
   try:
-    reflog(**base_kwargs)
+    reflog_cmd(**base_kwargs)
     assert False
   except NotImplementedError:
     pass
 
   # can you commit files?
   touch(os.path.join(root_rit_dir, 'first'))
-  first_commit = commit(**base_kwargs, msg="first")
+  first_commit = commit_cmd(**base_kwargs, msg="first")
   touch(os.path.join(root_rit_dir, 'second'))
-  second_commit = commit(**base_kwargs, msg="second")
+  second_commit = commit_cmd(**base_kwargs, msg="second")
   touch(os.path.join(root_rit_dir, 'third'))
-  third_commit = commit(**base_kwargs, msg="third")
+  third_commit = commit_cmd(**base_kwargs, msg="third")
 
   # can you checkout files?
-  ref = checkout(**base_kwargs, orphan=False, ref_or_name=first_commit.commit_id, force=False)
+  ref = checkout_cmd(**base_kwargs, orphan=False, ref_or_name=first_commit.commit_id, force=False)
   assert ref.commit.commit_id == first_commit.commit_id
 
   # dirty dir prevents checkout
   fourth_file = os.path.join(root_rit_dir, 'fourth')
   touch(fourth_file)
   try:
-    checkout(**base_kwargs, orphan=False, ref_or_name=second_commit.commit_id, force=False)
+    checkout_cmd(**base_kwargs, orphan=False, ref_or_name=second_commit.commit_id, force=False)
     assert False
   except rit.RitError:
     pass
 
   # force checkout ignores dirty dir
-  ref = checkout(**base_kwargs, orphan=False, ref_or_name=third_commit.commit_id, force=True)
+  ref = checkout_cmd(**base_kwargs, orphan=False, ref_or_name=third_commit.commit_id, force=True)
   curr_head = ref
   assert ref.commit.commit_id == third_commit.commit_id
   # file is gone, restore / checkout complete
   assert not os.path.exists(fourth_file)
 
   # can create branch at comits?
-  ref = branch(**base_kwargs, name='first_b', ref=first_commit.commit_id, force=False, delete=False)
+  ref = branch_cmd(**base_kwargs, name='first_b', ref=first_commit.commit_id, force=False, delete=False)
   assert ref.commit.commit_id == first_commit.commit_id
-  ref = branch(**base_kwargs, name='second_b', ref=second_commit.commit_id, force=False, delete=False)
+  ref = branch_cmd(**base_kwargs, name='second_b', ref=second_commit.commit_id, force=False, delete=False)
   assert ref.commit.commit_id == second_commit.commit_id
-  ref = branch(**base_kwargs, name='third_b', ref=third_commit.commit_id, force=False, delete=False)
+  ref = branch_cmd(**base_kwargs, name='third_b', ref=third_commit.commit_id, force=False, delete=False)
   assert ref.commit.commit_id == third_commit.commit_id
   # can create branch from branch
-  ref = branch(**base_kwargs, name='third_b_copy', ref='third_b', force=False, delete=False)
+  ref = branch_cmd(**base_kwargs, name='third_b_copy', ref='third_b', force=False, delete=False)
   assert ref.commit.commit_id == third_commit.commit_id
 
   # can move branch without force?
   try:
-    branch(**base_kwargs, name='second_b', ref=None, force=False, delete=False)
+    branch_cmd(**base_kwargs, name='second_b', ref=None, force=False, delete=False)
     assert False
   except rit.RitError:
     pass
 
   # move branch with force
-  ref = branch(**base_kwargs, name='second_b', ref=None, force=True, delete=False)
+  ref = branch_cmd(**base_kwargs, name='second_b', ref=None, force=True, delete=False)
   assert ref.commit.commit_id == curr_head.commit.commit_id
   assert ref.commit.commit_id != second_commit.commit_id
 
   # delete branch
-  ref = branch(**base_kwargs, name='second_b', ref=None, force=False, delete=True)
+  ref = branch_cmd(**base_kwargs, name='second_b', ref=None, force=False, delete=True)
   assert ref is None
 
   # delete non existent branch
   try:
-    branch(**base_kwargs, name='second_b', ref=None, force=False, delete=True)
+    branch_cmd(**base_kwargs, name='second_b', ref=None, force=False, delete=True)
     assert False
   except rit.RitError:
     pass
 
   # create it again after delete
-  ref = branch(**base_kwargs, name='second_b', ref=None, force=False, delete=False)
+  ref = branch_cmd(**base_kwargs, name='second_b', ref=None, force=False, delete=False)
   assert ref.commit.commit_id == curr_head.commit.commit_id
 
   expected_all_branches = set(['main', 'first_b', 'second_b', 'third_b', 'third_b_copy'])
-  branch_res = branch(**base_kwargs, name=None, ref=None, force=False, delete=False)
+  branch_res = branch_cmd(**base_kwargs, name=None, ref=None, force=False, delete=False)
   assert isinstance(branch_res, tuple)
   head, all_branches = branch_res
   assert head.branch_name is None
   assert set(all_branches) == expected_all_branches
 
-  checkout(**base_kwargs, orphan=False, ref_or_name='third_b', force=False)
-  branch_res = branch(**base_kwargs, name=None, ref=None, force=False, delete=False)
+  checkout_cmd(**base_kwargs, orphan=False, ref_or_name='third_b', force=False)
+  branch_res = branch_cmd(**base_kwargs, name=None, ref=None, force=False, delete=False)
   assert isinstance(branch_res, tuple)
   head, all_branches = branch_res
   assert head.branch_name == 'third_b'
   assert set(all_branches) == expected_all_branches
 
-  ref, changes = show(**base_kwargs, ref='third_b')
+  ref, changes = show_cmd(**base_kwargs, ref='third_b')
   assert ref.branch.name == 'third_b'
   assert ref.commit.msg == 'third'
   assert './third' in changes
 
-  ref, changes = show(**base_kwargs, ref='first_b')
+  ref, changes = show_cmd(**base_kwargs, ref='first_b')
   assert ref.branch.name == 'first_b'
   assert ref.commit.msg == 'first'
   assert './first' in changes
 
-  assert status(**base_kwargs) is None
+  assert status_cmd(**base_kwargs) is None
 
-  checkout(**base_kwargs, orphan=False, ref_or_name=second_commit.commit_id, force=True)
-  branch_res = branch(**base_kwargs, name='deviate', ref=None, force=False, delete=False)
+  checkout_cmd(**base_kwargs, orphan=False, ref_or_name=second_commit.commit_id, force=True)
+  branch_res = branch_cmd(**base_kwargs, name='deviate', ref=None, force=False, delete=False)
   assert branch_res.commit.commit_id == second_commit.commit_id
-  checkout(**base_kwargs, orphan=False, ref_or_name='deviate', force=False)
-  deviate_commit = commit(**base_kwargs, msg="deviation")
-  checkout(**base_kwargs, orphan=False, ref_or_name='third_b', force=False)
+  checkout_cmd(**base_kwargs, orphan=False, ref_or_name='deviate', force=False)
+  deviate_commit = commit_cmd(**base_kwargs, msg="deviation")
+  checkout_cmd(**base_kwargs, orphan=False, ref_or_name='third_b', force=False)
 
-  branch_res = branch(**base_kwargs, name=None, ref=None, force=False, delete=False)
+  branch_res = branch_cmd(**base_kwargs, name=None, ref=None, force=False, delete=False)
   assert isinstance(branch_res, tuple)
   head, all_branches = branch_res
   assert head.commit_id is None
   assert head.branch_name == 'third_b'
 
-  commit_graph, leafs, commit_id_to_commit, commit_id_to_branch_names = log(**base_kwargs, refs=[], all=False, full=False)
+  commit_graph, leafs, commit_id_to_commit, commit_id_to_branch_names = log_cmd(**base_kwargs, refs=[], all=False, full=False)
   assert len(leafs) == 1
   leaf_commit_id = list(leafs)[0]
   assert head.branch_name in commit_id_to_branch_names[leaf_commit_id]
   head_commit_id = leaf_commit_id
 
-  commit_graph, leafs, commit_id_to_commit, commit_id_to_branch_names = log(**base_kwargs, refs=['first_b'], all=False, full=False)
+  commit_graph, leafs, commit_id_to_commit, commit_id_to_branch_names = log_cmd(**base_kwargs, refs=['first_b'], all=False, full=False)
   assert len(leafs) == 1
   leaf_commit_id = list(leafs)[0]
   assert 'first_b' in commit_id_to_branch_names[leaf_commit_id]
 
-  commit_graph, leafs, commit_id_to_commit, commit_id_to_branch_names = log(**base_kwargs, refs=[first_commit.commit_id], all=False, full=False)
+  commit_graph, leafs, commit_id_to_commit, commit_id_to_branch_names = log_cmd(**base_kwargs, refs=[first_commit.commit_id], all=False, full=False)
   assert len(leafs) == 1
   leaf_commit_id = list(leafs)[0]
   assert 'first_b' in commit_id_to_branch_names[leaf_commit_id]
 
-  commit_graph, leafs, commit_id_to_commit, commit_id_to_branch_names = log(**base_kwargs, refs=[third_commit.commit_id], all=False, full=False)
+  commit_graph, leafs, commit_id_to_commit, commit_id_to_branch_names = log_cmd(**base_kwargs, refs=[third_commit.commit_id], all=False, full=False)
   assert len(leafs) == 1
   leaf_commit_id = list(leafs)[0]
   assert head.branch_name in commit_id_to_branch_names[leaf_commit_id]
 
-  commit_graph, leafs, commit_id_to_commit, commit_id_to_branch_names = log(**base_kwargs, refs=[first_commit.commit_id, third_commit.commit_id], all=False, full=False)
+  commit_graph, leafs, commit_id_to_commit, commit_id_to_branch_names = log_cmd(**base_kwargs, refs=[first_commit.commit_id, third_commit.commit_id], all=False, full=False)
   assert len(leafs) == 1
   leaf_commit_id = list(leafs)[0]
   assert head.branch_name in commit_id_to_branch_names[leaf_commit_id]
 
-  commit_graph, leafs, commit_id_to_commit, commit_id_to_branch_names = log(**base_kwargs, refs=['first_b', 'second_b'], all=False, full=False)
+  commit_graph, leafs, commit_id_to_commit, commit_id_to_branch_names = log_cmd(**base_kwargs, refs=['first_b', 'second_b'], all=False, full=False)
   assert len(leafs) == 1
   leaf_commit_id = list(leafs)[0]
   assert 'second_b' in commit_id_to_branch_names[leaf_commit_id]
 
   deviate_commit_id = None
-  commit_graph, leafs, commit_id_to_commit, commit_id_to_branch_names = log(**base_kwargs, refs=[], all=True, full=False)
+  commit_graph, leafs, commit_id_to_commit, commit_id_to_branch_names = log_cmd(**base_kwargs, refs=[], all=True, full=False)
   assert len(leafs) == 2
   for leaf in leafs:
     if leaf == head_commit_id:
@@ -210,7 +210,7 @@ def test_python_api():
   assert head_commit_id in commit_id_to_commit
 
   def info(root_rit_dir, refs, all):
-    rit_res = query(root_rit_dir=root_rit_dir)
+    rit_res = query_cmd(root_rit_dir=root_rit_dir)
     resolved_refs = rit.resolve_refs(rit_res, refs, all)
     commit_id_to_branch_names = rit_res.get_commit_id_to_branch_names()
     return resolved_refs, commit_id_to_branch_names
@@ -260,37 +260,37 @@ def test_python_api():
 
   # assert that delete can't be set when orphaning
   try:
-    checkout(**base_kwargs, orphan=True, ref_or_name='o_test', force=True)
+    checkout_cmd(**base_kwargs, orphan=True, ref_or_name='o_test', force=True)
     assert False
   except TypeError:
     pass
 
   try:
-    checkout(**base_kwargs, orphan=True, ref_or_name='o_test', force=False)
+    checkout_cmd(**base_kwargs, orphan=True, ref_or_name='o_test', force=False)
     assert False
   except TypeError:
     pass
 
   try:
-    checkout(**base_kwargs, orphan=True, ref_or_name=None, force=None)
+    checkout_cmd(**base_kwargs, orphan=True, ref_or_name=None, force=None)
     assert False
   except TypeError:
     pass
 
-  checkout(**base_kwargs, orphan=True, ref_or_name='otest', force=None)
+  checkout_cmd(**base_kwargs, orphan=True, ref_or_name='otest', force=None)
 
-  rit_res = query(**base_kwargs)
+  rit_res = query_cmd(**base_kwargs)
   assert rit_res.head.branch_name == 'otest'
   assert rit_res.head.commit_id is None
   assert rit_res.get_branch('otest') is None
 
-  new_commit = commit(**base_kwargs, msg='Initial commit for otest')
+  new_commit = commit_cmd(**base_kwargs, msg='Initial commit for otest')
 
   # Verify no parents
   assert new_commit.parent_commit_id is None
 
   # get rit res
-  rit_res = query(**base_kwargs)
+  rit_res = query_cmd(**base_kwargs)
 
   # verify commit id matches what was returned
   new_commit_lookup = rit_res.get_commit(new_commit.commit_id, ensure=True)
@@ -311,19 +311,19 @@ def test_python_api():
   assert new_branch.commit_id == new_commit.commit_id
 
   # add files
-  branch(**base_kwargs, name="otest_root", ref=None, force=False, delete=False)
+  branch_cmd(**base_kwargs, name="otest_root", ref=None, force=False, delete=False)
   otest_a_file = os.path.join(root_rit_dir, 'otest_a')
   touch(otest_a_file)
-  commit(**base_kwargs, msg="add a")
-  branch(**base_kwargs, name="otest_a", ref=None, force=False, delete=False)
+  commit_cmd(**base_kwargs, msg="add a")
+  branch_cmd(**base_kwargs, name="otest_a", ref=None, force=False, delete=False)
   otest_b_file = os.path.join(root_rit_dir, 'otest_b')
   touch(otest_b_file)
-  top_commit = commit(**base_kwargs, msg="add b")
-  branch(**base_kwargs, name="otest_b", ref=None, force=False, delete=False)
+  top_commit = commit_cmd(**base_kwargs, msg="add b")
+  branch_cmd(**base_kwargs, name="otest_b", ref=None, force=False, delete=False)
   otest_c_file = os.path.join(root_rit_dir, 'otest_c')
   touch(otest_c_file)
 
-  rit_res = query(**base_kwargs)
+  rit_res = query_cmd(**base_kwargs)
   assert rit_res.head.branch_name == 'otest'
   otest_root_branch = rit_res.get_branch('otest_root')
   assert otest_root_branch is not None
@@ -342,26 +342,26 @@ def test_python_api():
   commit_chain = [root_commit_id, top_commit.parent_commit_id, top_commit.commit_id]
 
   # make orphan and make sure changes are still there
-  checkout(**base_kwargs, orphan=True, ref_or_name='otest_2', force=None)
+  checkout_cmd(**base_kwargs, orphan=True, ref_or_name='otest_2', force=None)
 
   assert os.path.exists(otest_a_file)
   assert os.path.exists(otest_b_file)
   assert os.path.exists(otest_c_file)
 
-  checkout(**base_kwargs, orphan=True, ref_or_name='otest_3', force=None)
+  checkout_cmd(**base_kwargs, orphan=True, ref_or_name='otest_3', force=None)
 
   assert os.path.exists(otest_a_file)
   assert os.path.exists(otest_b_file)
   assert os.path.exists(otest_c_file)
 
   # get rit res
-  rit_res = query(**base_kwargs)
+  rit_res = query_cmd(**base_kwargs)
   assert rit_res.get_branch('otest_2') is None
   assert rit_res.get_branch('otest_3') is None
   assert rit_res.head.branch_name == 'otest_3'
 
-  reset(**base_kwargs, ref=commit_chain[0], hard=False)
-  rit_res = query(**base_kwargs)
+  reset_cmd(**base_kwargs, ref=commit_chain[0], hard=False)
+  rit_res = query_cmd(**base_kwargs)
   assert rit_res.head.branch_name == 'otest_3'
   assert rit_res.head.commit_id is None
   this_branch = rit_res.get_branch('otest_3', ensure=True)
@@ -371,18 +371,18 @@ def test_python_api():
   assert os.path.exists(otest_b_file)
   assert os.path.exists(otest_c_file)
 
-  reset(**base_kwargs, ref=None, hard=False)
-  rit_res = query(**base_kwargs)
+  reset_cmd(**base_kwargs, ref=None, hard=False)
+  rit_res = query_cmd(**base_kwargs)
   assert rit_res.get_branch('otest_2') is None
   assert rit_res.head.branch_name == 'otest_3'
 
-  reset(**base_kwargs, ref=rit.head_ref_name, hard=False)
-  rit_res = query(**base_kwargs)
+  reset_cmd(**base_kwargs, ref=rit.head_ref_name, hard=False)
+  rit_res = query_cmd(**base_kwargs)
   assert rit_res.get_branch('otest_2') is None
   assert rit_res.head.branch_name == 'otest_3'
 
-  reset(**base_kwargs, ref=commit_chain[1], hard=False)
-  rit_res = query(**base_kwargs)
+  reset_cmd(**base_kwargs, ref=commit_chain[1], hard=False)
+  rit_res = query_cmd(**base_kwargs)
   assert rit_res.head.branch_name == 'otest_3'
   assert rit_res.head.commit_id is None
   this_branch = rit_res.get_branch('otest_3', ensure=True)
@@ -392,16 +392,16 @@ def test_python_api():
   assert os.path.exists(otest_b_file)
   assert os.path.exists(otest_c_file)
 
-  reset(**base_kwargs, ref=None, hard=False)
-  rit_res = query(**base_kwargs)
+  reset_cmd(**base_kwargs, ref=None, hard=False)
+  rit_res = query_cmd(**base_kwargs)
   assert rit_res.head.branch_name == 'otest_3'
 
-  reset(**base_kwargs, ref=rit.head_ref_name, hard=False)
-  rit_res = query(**base_kwargs)
+  reset_cmd(**base_kwargs, ref=rit.head_ref_name, hard=False)
+  rit_res = query_cmd(**base_kwargs)
   assert rit_res.head.branch_name == 'otest_3'
 
-  reset(**base_kwargs, ref=commit_chain[2], hard=False)
-  rit_res = query(**base_kwargs)
+  reset_cmd(**base_kwargs, ref=commit_chain[2], hard=False)
+  rit_res = query_cmd(**base_kwargs)
   assert rit_res.head.branch_name == 'otest_3'
   assert rit_res.head.commit_id is None
   this_branch = rit_res.get_branch('otest_3', ensure=True)
@@ -411,117 +411,117 @@ def test_python_api():
   assert os.path.exists(otest_b_file)
   assert os.path.exists(otest_c_file)
 
-  checkout(**base_kwargs, orphan=False, ref_or_name=commit_chain[2], force=False)
-  rit_res = query(**base_kwargs)
+  checkout_cmd(**base_kwargs, orphan=False, ref_or_name=commit_chain[2], force=False)
+  rit_res = query_cmd(**base_kwargs)
   assert rit_res.head.branch_name is None
   assert rit_res.head.commit_id == commit_chain[2]
-  reset(**base_kwargs, ref=commit_chain[0], hard=False)
-  rit_res = query(**base_kwargs)
+  reset_cmd(**base_kwargs, ref=commit_chain[0], hard=False)
+  rit_res = query_cmd(**base_kwargs)
   assert rit_res.head.branch_name is None
   assert rit_res.head.commit_id == commit_chain[0]
   assert os.path.exists(otest_a_file)
   assert os.path.exists(otest_b_file)
   assert os.path.exists(otest_c_file)
 
-  reset(**base_kwargs, ref=None, hard=False)
-  rit_res = query(**base_kwargs)
+  reset_cmd(**base_kwargs, ref=None, hard=False)
+  rit_res = query_cmd(**base_kwargs)
   assert rit_res.head.commit_id == commit_chain[0]
 
-  reset(**base_kwargs, ref=rit.head_ref_name, hard=False)
-  rit_res = query(**base_kwargs)
+  reset_cmd(**base_kwargs, ref=rit.head_ref_name, hard=False)
+  rit_res = query_cmd(**base_kwargs)
   assert rit_res.head.commit_id == commit_chain[0]
 
-  reset(**base_kwargs, ref=commit_chain[2], hard=False)
-  rit_res = query(**base_kwargs)
+  reset_cmd(**base_kwargs, ref=commit_chain[2], hard=False)
+  rit_res = query_cmd(**base_kwargs)
   assert rit_res.head.branch_name is None
   assert rit_res.head.commit_id == commit_chain[2]
   assert os.path.exists(otest_a_file)
   assert os.path.exists(otest_b_file)
   assert os.path.exists(otest_c_file)
 
-  reset(**base_kwargs, ref=commit_chain[0], hard=False)
-  rit_res = query(**base_kwargs)
+  reset_cmd(**base_kwargs, ref=commit_chain[0], hard=False)
+  rit_res = query_cmd(**base_kwargs)
   assert rit_res.head.branch_name is None
   assert rit_res.head.commit_id == commit_chain[0]
   assert os.path.exists(otest_a_file)
   assert os.path.exists(otest_b_file)
   assert os.path.exists(otest_c_file)
 
-  reset(**base_kwargs, ref=commit_chain[2], hard=True)
-  rit_res = query(**base_kwargs)
+  reset_cmd(**base_kwargs, ref=commit_chain[2], hard=True)
+  rit_res = query_cmd(**base_kwargs)
   assert rit_res.head.branch_name is None
   assert rit_res.head.commit_id == commit_chain[2]
   assert os.path.exists(otest_a_file)
   assert os.path.exists(otest_b_file)
   assert not os.path.exists(otest_c_file)
 
-  reset(**base_kwargs, ref=commit_chain[1], hard=True)
-  rit_res = query(**base_kwargs)
+  reset_cmd(**base_kwargs, ref=commit_chain[1], hard=True)
+  rit_res = query_cmd(**base_kwargs)
   assert rit_res.head.branch_name is None
   assert rit_res.head.commit_id == commit_chain[1]
   assert os.path.exists(otest_a_file)
   assert not os.path.exists(otest_b_file)
   assert not os.path.exists(otest_c_file)
 
-  reset(**base_kwargs, ref=commit_chain[0], hard=True)
-  rit_res = query(**base_kwargs)
+  reset_cmd(**base_kwargs, ref=commit_chain[0], hard=True)
+  rit_res = query_cmd(**base_kwargs)
   assert rit_res.head.branch_name is None
   assert rit_res.head.commit_id == commit_chain[0]
   assert not os.path.exists(otest_a_file)
   assert not os.path.exists(otest_b_file)
   assert not os.path.exists(otest_c_file)
 
-  reset(**base_kwargs, ref=commit_chain[1], hard=True)
-  rit_res = query(**base_kwargs)
+  reset_cmd(**base_kwargs, ref=commit_chain[1], hard=True)
+  rit_res = query_cmd(**base_kwargs)
   assert rit_res.head.branch_name is None
   assert rit_res.head.commit_id == commit_chain[1]
   assert os.path.exists(otest_a_file)
   assert not os.path.exists(otest_b_file)
   assert not os.path.exists(otest_c_file)
 
-  reset(**base_kwargs, ref=commit_chain[2], hard=True)
-  rit_res = query(**base_kwargs)
+  reset_cmd(**base_kwargs, ref=commit_chain[2], hard=True)
+  rit_res = query_cmd(**base_kwargs)
   assert rit_res.head.branch_name is None
   assert rit_res.head.commit_id == commit_chain[2]
   assert os.path.exists(otest_a_file)
   assert os.path.exists(otest_b_file)
   assert not os.path.exists(otest_c_file)
 
-  checkout(**base_kwargs, orphan=False, ref_or_name='otest_3', force=True)
-  reset(**base_kwargs, ref=commit_chain[2], hard=True)
-  rit_res = query(**base_kwargs)
+  checkout_cmd(**base_kwargs, orphan=False, ref_or_name='otest_3', force=True)
+  reset_cmd(**base_kwargs, ref=commit_chain[2], hard=True)
+  rit_res = query_cmd(**base_kwargs)
   assert rit_res.head.branch_name == 'otest_3'
   assert rit_res.head.commit_id is None
   assert os.path.exists(otest_a_file)
   assert os.path.exists(otest_b_file)
   assert not os.path.exists(otest_c_file)
 
-  reset(**base_kwargs, ref=commit_chain[1], hard=True)
-  rit_res = query(**base_kwargs)
+  reset_cmd(**base_kwargs, ref=commit_chain[1], hard=True)
+  rit_res = query_cmd(**base_kwargs)
   assert rit_res.head.branch_name == 'otest_3'
   assert rit_res.head.commit_id is None
   assert os.path.exists(otest_a_file)
   assert not os.path.exists(otest_b_file)
   assert not os.path.exists(otest_c_file)
 
-  reset(**base_kwargs, ref=commit_chain[0], hard=True)
-  rit_res = query(**base_kwargs)
+  reset_cmd(**base_kwargs, ref=commit_chain[0], hard=True)
+  rit_res = query_cmd(**base_kwargs)
   assert rit_res.head.branch_name == 'otest_3'
   assert rit_res.head.commit_id is None
   assert not os.path.exists(otest_a_file)
   assert not os.path.exists(otest_b_file)
   assert not os.path.exists(otest_c_file)
 
-  checkout(**base_kwargs, orphan=False, ref_or_name='deviate', force=True)
-  rit_res = query(**base_kwargs)
+  checkout_cmd(**base_kwargs, orphan=False, ref_or_name='deviate', force=True)
+  rit_res = query_cmd(**base_kwargs)
   head_branch = rit_res.get_branch(rit_res.head.branch_name)
   head_commit_id = head_branch.commit_id
   head_commit = rit_res.get_commit(head_commit_id, ensure=True)
-  reset(**base_kwargs, ref=head_commit.parent_commit_id, hard=False)
-  rit_res = query(**base_kwargs)
+  reset_cmd(**base_kwargs, ref=head_commit.parent_commit_id, hard=False)
+  rit_res = query_cmd(**base_kwargs)
   rit_res.get_commit(head_commit_id, ensure=True)
-  prune_res = prune(**base_kwargs)
-  rit_res = query(**base_kwargs)
+  prune_res = prune_cmd(**base_kwargs)
+  rit_res = query_cmd(**base_kwargs)
   assert rit_res.get_commit(head_commit_id) is None
   assert len(prune_res) == 1
   assert prune_res[0].commit_id
