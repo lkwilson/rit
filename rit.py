@@ -253,6 +253,30 @@ class RitResource:
     self._write_commit(commit)
     self._clear()
 
+  def prune(self):
+    leaf_commits = set()
+    if self.head.commit_id is not None:
+      leaf_commits.add(self.head.commit_id)
+    for branch_name in self.get_branch_names():
+      leaf_commits.add(self.get_branch(branch_name, ensure=True).commit_id)
+
+    refed_commits = set(leaf_commits)
+    for leaf_commit in leaf_commits:
+      while True:
+        commit = self.get_commit(leaf_commit, ensure=True)
+        if commit.parent_commit_id is None or commit.parent_commit_id in refed_commits:
+          break
+        refed_commits.add(commit.parent_commit_id)
+        leaf_commit = commit.parent_commit_id
+
+    removed_commit_ids = []
+    for commit_id in self.get_commit_ids():
+      if commit_id in refed_commits:
+        continue
+      self._delete_commit(commit_id)
+      removed_commit_ids.append(commit_id)
+    return removed_commit_ids
+
   def set_branch(self, branch: Branch):
     ''' add the branch to the rit dir '''
     if self.prevent_mutations:
@@ -428,6 +452,22 @@ class RitResource:
       data = asdict(commit)
       del data['commit_id']
       json.dump(data, fout)
+
+  def _delete_commit(self, commit_id: str):
+    try:
+      os.remove(os.path.join(self.paths.commits, commit_id))
+    except FileNotFoundError:
+      raise RitError("Failed to remove commit since it didn't exist: %s", commit_id)
+
+    try:
+      os.remove(get_tar_path(self, commit_id))
+    except FileNotFoundError:
+      raise RitError("Failed to remove commit's tar since it didn't exist: %s", commit_id)
+
+    try:
+      os.remove(get_snar_path(self, commit_id))
+    except FileNotFoundError:
+      raise RitError("Failed to remove commit's snar since it didn't exist: %s", commit_id)
 
   def _read_branch(self, name: str):
     logger.debug("Reading branch: %s", name)
@@ -1027,90 +1067,9 @@ def status_head(rit: RitResource):
   if not status_tar(rit, True):
     logger.info("Clean working directory!")
 
-'''
-API
-
-You should be able to do anything you want with these functions.
-'''
-
-def query(*, root_rit_dir: str):
-  '''
-  Return a read only RitResource used for querying the rit directory.
-
-  CLI users get information via stdout. That's not helpful to for python users,
-  so they instead get access to the full data structure.
-
-  For advanced users who want write access to the rit directory, construct a
-  RitResource directly with prevent_mutations set to False and read the class'
-  docs.
-  '''
-  return RitResource(root_rit_dir, prevent_mutations=True)
-
-def init(*, root_rit_dir: str):
-  logger.debug("init")
-  rit = RitResource(root_rit_dir)
-  rit.initialize()
-
-def commit(*, root_rit_dir: str, msg: str):
-  logger.debug('commit')
-  logger.debug('  msg: %s', msg)
-  check_types(
-    msg = (msg, exact_t(str)),
-  )
-
-  rit = RitResource(root_rit_dir)
-  commit = create_commit(rit, time.time(), msg)
-  logger.info("Created commit %s: %s", commit.commit_id[:short_hash_index], commit.msg)
-  return commit
-
-def reset(*, root_rit_dir: str, ref: Optional[str], hard: bool):
-  '''
-  A reset tries to move the head to ref. If head is a branch, it instead moves
-  the branch. If head is a commit, it just moves head to the new commit. If it's
-  a hard reset, then post moving head, the working changes are removed.
-
-  Here, a non hard reset is effectively the same as git's reset with no
-  arguments. In git, a reset with no args is --mixed, and since we don't have
-  staged changes, --mixed and --soft are the same in this context.  For that
-  reason, here, we just use the terminology reset instead of soft reset or mixed
-  reset.
-  '''
-  logger.debug('reset')
-  logger.debug('  ref: %s', ref)
-  logger.debug('  hard: %s', hard)
-  check_types(
-    ref = (ref, optional_t(exact_t(str))),
-    hard = (hard, exact_t(bool)),
-  )
-
-  rit = RitResource(root_rit_dir)
-  res = resolve_ref(rit, ref)
-
-  if res.commit is None:
-    raise RitError("Unable to resolve ref to commit: %s", ref)
-
-  if rit.head.branch_name is not None:
-    branch = rit.get_branch(rit.head.branch_name, ensure=False)
-    if branch is None:
-      branch = Branch(rit.head.branch_name, res.commit.commit_id)
-    else:
-      branch.commit_id = res.commit.commit_id
-    rit.set_branch(branch)
-  else:
-    new_head = HeadNode(commit_id = res.commit.commit_id)
-    rit.set_head(new_head)
-
-  restored = False
-  if hard:
-    restored = True
-    restore_to_commit(rit, res.commit)
-
-  if restored:
-    logger.info("Successful reset. Commit this checkout to get a clean rit status.")
-  else:
-    logger.info("Successful reset")
-
-  return res
+def prune_commits(rit: RitResource):
+  ''' remove any commits not associated to a branch history '''
+  return rit.prune()
 
 def checkout_ref(*, root_rit_dir: str, ref: str, force: bool):
   '''
@@ -1192,7 +1151,92 @@ def checkout_orphan(*,
   new_head = HeadNode(branch_name=name)
   rit.set_head(new_head)
 
-def checkout(*, root_rit_dir: str, orphan: bool, ref_or_name: str, force: Optional[bool]):
+'''
+API
+
+You should be able to do anything you want with these functions.
+'''
+
+def query_cmd(*, root_rit_dir: str):
+  '''
+  Return a read only RitResource used for querying the rit directory.
+
+  CLI users get information via stdout. That's not helpful to for python users,
+  so they instead get access to the full data structure.
+
+  For advanced users who want write access to the rit directory, construct a
+  RitResource directly with prevent_mutations set to False and read the class'
+  docs.
+  '''
+  return RitResource(root_rit_dir, prevent_mutations=True)
+
+def init_cmd(*, root_rit_dir: str):
+  logger.debug("init")
+  rit = RitResource(root_rit_dir)
+  rit.initialize()
+
+def commit_cmd(*, root_rit_dir: str, msg: str):
+  logger.debug('commit')
+  logger.debug('  msg: %s', msg)
+  check_types(
+    msg = (msg, exact_t(str)),
+  )
+
+  rit = RitResource(root_rit_dir)
+  commit = create_commit(rit, time.time(), msg)
+  logger.info("Created commit %s: %s", commit.commit_id[:short_hash_index], commit.msg)
+  return commit
+
+def reset_cmd(*, root_rit_dir: str, ref: Optional[str], hard: bool):
+  '''
+  A reset tries to move the head to ref. If head is a branch, it instead moves
+  the branch. If head is a commit, it just moves head to the new commit. If it's
+  a hard reset, then post moving head, the working changes are removed.
+
+  Here, a non hard reset is effectively the same as git's reset with no
+  arguments. In git, a reset with no args is --mixed, and since we don't have
+  staged changes, --mixed and --soft are the same in this context.  For that
+  reason, here, we just use the terminology reset instead of soft reset or mixed
+  reset.
+  '''
+  logger.debug('reset')
+  logger.debug('  ref: %s', ref)
+  logger.debug('  hard: %s', hard)
+  check_types(
+    ref = (ref, optional_t(exact_t(str))),
+    hard = (hard, exact_t(bool)),
+  )
+
+  rit = RitResource(root_rit_dir)
+  res = resolve_ref(rit, ref)
+
+  if res.commit is None:
+    raise RitError("Unable to resolve ref to commit: %s", ref)
+
+  if rit.head.branch_name is not None:
+    branch = rit.get_branch(rit.head.branch_name, ensure=False)
+    if branch is None:
+      branch = Branch(rit.head.branch_name, res.commit.commit_id)
+    else:
+      branch.commit_id = res.commit.commit_id
+    rit.set_branch(branch)
+  else:
+    new_head = HeadNode(commit_id = res.commit.commit_id)
+    rit.set_head(new_head)
+
+  restored = False
+  if hard:
+    restored = True
+    restore_to_commit(rit, res.commit)
+
+  if restored:
+    logger.info("Successful reset. Commit this checkout to get a clean rit status.")
+  else:
+    logger.info("Successful reset")
+
+  return res
+
+def checkout_cmd(*, root_rit_dir: str, orphan: bool, ref_or_name: str, force: Optional[bool]):
   '''
   Forwards to checkout_ref or checkout_orphan
   '''
@@ -1212,7 +1256,7 @@ def checkout(*, root_rit_dir: str, orphan: bool, ref_or_name: str, force: Option
   else:
     return checkout_ref(root_rit_dir=root_rit_dir, ref=ref_or_name, force=force)
 
-def branch(*, root_rit_dir: str, name: Optional[str], ref: Optional[str], force: bool, delete: bool):
+def branch_cmd(*, root_rit_dir: str, name: Optional[str], ref: Optional[str], force: bool, delete: bool):
   '''
   ref is a ref name or commit id or head_ref_name
 
@@ -1257,7 +1301,7 @@ def branch(*, root_rit_dir: str, name: Optional[str], ref: Optional[str], force:
   else:
     return create_branch(rit, name, ref, force)
 
-def log(*, root_rit_dir: str, refs: list[str], all: bool, full: bool):
+def log_cmd(*, root_rit_dir: str, refs: list[str], all: bool, full: bool):
   logger.debug('log')
   logger.debug('  refs: %s', refs)
   logger.debug('  all: %s', all)
@@ -1271,7 +1315,7 @@ def log(*, root_rit_dir: str, refs: list[str], all: bool, full: bool):
   rit = RitResource(root_rit_dir)
   return log_refs(rit, refs, all, full)
 
-def show(*, root_rit_dir: str, ref: Optional[str]):
+def show_cmd(*, root_rit_dir: str, ref: Optional[str]):
   logger.debug('show')
   logger.debug('  ref: %s', ref)
   check_types(ref = (ref, optional_t(exact_t(str))))
@@ -1279,33 +1323,34 @@ def show(*, root_rit_dir: str, ref: Optional[str]):
   rit = RitResource(root_rit_dir)
   return show_ref(rit, ref)
 
-def status(*, root_rit_dir: str):
+def status_cmd(*, root_rit_dir: str):
   logger.debug('status')
 
   rit = RitResource(root_rit_dir)
   status_head(rit)
 
-def reflog(*, root_rit_dir: str):
+def reflog_cmd(*, root_rit_dir: str):
   logger.debug('reflog')
   raise NotImplementedError()
 
-def prune(*, root_rit_dir: str):
-  # Prune lost branches
+def prune_cmd(*, root_rit_dir: str):
   logger.debug('prune')
-  raise NotImplementedError()
+
+  rit = RitResource(root_rit_dir)
+  return prune_commits(rit)
 
 ''' ARG HANDLERS '''
 
 def init_main(argv, prog):
   parser = argparse.ArgumentParser(description="Initialize a raw backup directory", prog=prog)
   args = parser.parse_args(argv)
-  init(root_rit_dir=os.getcwd(), **vars(args))
+  init_cmd(root_rit_dir=os.getcwd(), **vars(args))
 
 def commit_main(argv, prog):
   parser = argparse.ArgumentParser(description="Create a commit from the current state", prog=prog)
   parser.add_argument('msg', help="The commit msg")
   args = parser.parse_args(argv)
-  commit(root_rit_dir=os.getcwd(), **vars(args))
+  commit_cmd(root_rit_dir=os.getcwd(), **vars(args))
 
 def checkout_main(argv, prog):
   parser = argparse.ArgumentParser(description="Log the current commit history", prog=prog)
@@ -1316,14 +1361,14 @@ def checkout_main(argv, prog):
   kwargs = vars(args)
   if kwargs['orphan']:
     kwargs['force'] = None
-  checkout(root_rit_dir=os.getcwd(), **kwargs)
+  checkout_cmd(root_rit_dir=os.getcwd(), **kwargs)
 
 def reset_main(argv, prog):
   parser = argparse.ArgumentParser(description="Log the current commit history", prog=prog)
   parser.add_argument('ref', nargs='?', help="The ref to reset head to")
   parser.add_argument('--hard', action='store_true', help="Apply the target commits upon reset")
   args = parser.parse_args(argv)
-  reset(root_rit_dir=os.getcwd(), **vars(args))
+  reset_cmd(root_rit_dir=os.getcwd(), **vars(args))
 
 def branch_main(argv, prog):
   parser = argparse.ArgumentParser(description="Create a new branch", prog=prog)
@@ -1332,18 +1377,18 @@ def branch_main(argv, prog):
   parser.add_argument('-f', '--force', action='store_true', help="The head of the new branch. By default, the current commit is used.")
   parser.add_argument('-d', '--delete', action='store_true', help="Delete the specified branch.")
   args = parser.parse_args(argv)
-  branch(root_rit_dir=os.getcwd(), **vars(args))
+  branch_cmd(root_rit_dir=os.getcwd(), **vars(args))
 
 def show_main(argv, prog):
   parser = argparse.ArgumentParser(description="Show contents of a commit", prog=prog)
   parser.add_argument('ref', nargs='?', help="The ref to show commit contents of. By default, head.")
   args = parser.parse_args(argv)
-  show(root_rit_dir=os.getcwd(), **vars(args))
+  show_cmd(root_rit_dir=os.getcwd(), **vars(args))
 
 def status_main(argv, prog):
   parser = argparse.ArgumentParser(description="Show the current directory's diff state.", prog=prog)
   args = parser.parse_args(argv)
-  status(root_rit_dir=os.getcwd(), **vars(args))
+  status_cmd(root_rit_dir=os.getcwd(), **vars(args))
 
 def log_main(argv, prog):
   parser = argparse.ArgumentParser(description="Log the current commit history", prog=prog)
@@ -1351,7 +1396,12 @@ def log_main(argv, prog):
   parser.add_argument('--all', action='store_true', help="Include all branches")
   parser.add_argument('--full', action='store_true', help="Include more log data")
   args = parser.parse_args(argv)
-  log(root_rit_dir=os.getcwd(), **vars(args))
+  log_cmd(root_rit_dir=os.getcwd(), **vars(args))
+
+def prune_main(argv, prog):
+  parser = argparse.ArgumentParser(description="Prune commits not part of a branch or head", prog=prog)
+  args = parser.parse_args(argv)
+  prune_cmd(root_rit_dir=os.getcwd(), **vars(args))
 
 command_handlers = dict(
   init = init_main,
@@ -1362,6 +1412,7 @@ command_handlers = dict(
   show = show_main,
   status = status_main,
   log = log_main,
+  prune = prune_main,
 )
 
 
