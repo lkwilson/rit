@@ -524,4 +524,4 @@ def test_python_api():
   rit_res = query_cmd(**base_kwargs)
   assert rit_res.get_commit(head_commit_id) is None
   assert len(prune_res) == 1
-  assert prune_res[0].commit_id
+  assert prune_res[0] == head_commit_id

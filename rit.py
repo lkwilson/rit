@@ -253,6 +253,30 @@ class RitResource:
     self._write_commit(commit)
     self._clear()
 
+  def prune(self):
+    leaf_commits = set()
+    if self.head.commit_id is not None:
+      leaf_commits.add(self.head.commit_id)
+    for branch_name in self.get_branch_names():
+      leaf_commits.add(self.get_branch(branch_name, ensure=True).commit_id)
+
+    refed_commits = set(leaf_commits)
+    for leaf_commit in leaf_commits:
+      while True:
+        commit = self.get_commit(leaf_commit, ensure=True)
+        if commit.parent_commit_id is None or commit.parent_commit_id in refed_commits:
+          break
+        refed_commits.add(commit.parent_commit_id)
+        leaf_commit = commit.parent_commit_id
+
+    removed_commit_ids = []
+    for commit_id in self.get_commit_ids():
+      if commit_id in refed_commits:
+        continue
+      self._delete_commit(commit_id)
+      removed_commit_ids.append(commit_id)
+    return removed_commit_ids
+
   def set_branch(self, branch: Branch):
     ''' add the branch to the rit dir '''
     if self.prevent_mutations:
@@ -428,6 +452,22 @@ class RitResource:
       data = asdict(commit)
       del data['commit_id']
       json.dump(data, fout)
+
+  def _delete_commit(self, commit_id: str):
+    try:
+      os.remove(os.path.join(self.paths.commits, commit_id))
+    except FileNotFoundError:
+      raise RitError("Failed to remove commit since it didn't exist: %s", commit_id)
+
+    try:
+      os.remove(get_tar_path(self, commit_id))
+    except FileNotFoundError:
+      raise RitError("Failed to remove commit's tar since it didn't exist: %s", commit_id)
+
+    try:
+      os.remove(get_snar_path(self, commit_id))
+    except FileNotFoundError:
+      raise RitError("Failed to remove commit's snar since it didn't exist: %s", commit_id)
 
   def _read_branch(self, name: str):
     logger.debug("Reading branch: %s", name)
@@ -1029,23 +1069,7 @@ def status_head(rit: RitResource):
 
 def prune_commits(rit: RitResource):
   ''' remove any commits not associated to a branch history '''
-  leaf_commits = set()
-  if rit.head.commit_id is not None:
-    leaf_commits.add(rit.head.commit_id)
-  for branch_name in rit.get_branch_names():
-    leaf_commits.add(rit.get_branch(branch_name, ensure=True).commit_id)
-
-  refed_commits = set(leaf_commits)
-  for leaf_commit in leaf_commits:
-    while True:
-      commit = rit.get_commit(leaf_commit, ensure=True)
-      if commit.parent_commit_id is None or commit.parent_commit_id in refed_commits:
-        break
-      refed_commits.add(commit.parent_commit_id)
-      leaf_commit = commit.parent_commit_id
-
-  # get all commits from file system not in refed_commits
-  # delete them
+  return rit.prune()
 
 def checkout_ref(*, root_rit_dir: str, ref: str, force: bool):
   '''
@@ -1313,7 +1337,7 @@ def prune_cmd(*, root_rit_dir: str):
   logger.debug('prune')
 
   rit = RitResource(root_rit_dir)
-  prune_commits(rit)
+  return prune_commits(rit)
 
 ''' ARG HANDLERS '''
 
