@@ -122,7 +122,11 @@ python "$rit_bin" "$@" checkout orph_bak || bad
 python "$rit_bin" "$@" checkout first || bad
 [ -f ddd ] && bad
 
-# TODO: prune test
+num_commits_before=$(ls .rit/backups/ | wc -l)
+python "$rit_bin" "$@" checkout add_bb --force || bad
+python "$rit_bin" "$@" reset main || bad
+num_commits_after=$(ls .rit/backups/ | wc -l)
+[ $num_commits_before -eq $num_commits_after ] && bad
 
 set +x
 

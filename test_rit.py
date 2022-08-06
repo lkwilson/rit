@@ -54,12 +54,6 @@ def test_python_api():
   except NotImplementedError:
     pass
 
-  try:
-    prune(**base_kwargs)
-    assert False
-  except NotImplementedError:
-    pass
-
   # can you commit files?
   touch(os.path.join(root_rit_dir, 'first'))
   first_commit = commit(**base_kwargs, msg="first")
@@ -518,4 +512,16 @@ def test_python_api():
   assert not os.path.exists(otest_b_file)
   assert not os.path.exists(otest_c_file)
 
-  # TODO: prune test
+  checkout(**base_kwargs, orphan=False, ref_or_name='deviate', force=True)
+  rit_res = query(**base_kwargs)
+  head_branch = rit_res.get_branch(rit_res.head.branch_name)
+  head_commit_id = head_branch.commit_id
+  head_commit = rit_res.get_commit(head_commit_id, ensure=True)
+  reset(**base_kwargs, ref=head_commit.parent_commit_id, hard=False)
+  rit_res = query(**base_kwargs)
+  rit_res.get_commit(head_commit_id, ensure=True)
+  prune_res = prune(**base_kwargs)
+  rit_res = query(**base_kwargs)
+  assert rit_res.get_commit(head_commit_id) is None
+  assert len(prune_res) == 1
+  assert prune_res[0].commit_id
