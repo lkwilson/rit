@@ -1,9 +1,9 @@
 import os
 
 # public api
-from rit import init_cmd, commit_cmd, reset_cmd, checkout_cmd, branch_cmd, log_cmd, show_cmd, status_cmd, prune_cmd, query_cmd
+from rit_lib import init_cmd, commit_cmd, reset_cmd, checkout_cmd, branch_cmd, log_cmd, show_cmd, status_cmd, prune_cmd, query_cmd
 # advanced api
-import rit
+import rit_lib
 
 def test_pprint_time_duration():
   min = 60
@@ -32,7 +32,7 @@ def test_pprint_time_duration():
     10 * year,
     100 * year,
   ]:
-    print(i, rit.pprint_time_duration(0, i))
+    print(i, rit_lib.pprint_time_duration(0, i))
   # assert False
 
 def touch(fn: str):
@@ -65,7 +65,7 @@ def test_python_api():
   try:
     checkout_cmd(**base_kwargs, orphan=False, ref_or_name=second_commit.commit_id, force=False)
     assert False
-  except rit.RitError:
+  except rit_lib.RitError:
     pass
 
   # force checkout ignores dirty dir
@@ -90,7 +90,7 @@ def test_python_api():
   try:
     branch_cmd(**base_kwargs, name='second_b', ref=None, force=False, delete=False)
     assert False
-  except rit.RitError:
+  except rit_lib.RitError:
     pass
 
   # move branch with force
@@ -106,7 +106,7 @@ def test_python_api():
   try:
     branch_cmd(**base_kwargs, name='second_b', ref=None, force=False, delete=True)
     assert False
-  except rit.RitError:
+  except rit_lib.RitError:
     pass
 
   # create it again after delete
@@ -189,7 +189,7 @@ def test_python_api():
   for leaf in leafs:
     if leaf == head_commit_id:
       assert 'third_b' in commit_id_to_branch_names[leaf]
-      assert rit.head_ref_name in commit_id_to_branch_names[leaf]
+      assert rit_lib.head_ref_name in commit_id_to_branch_names[leaf]
     else:
       assert 'deviate' in commit_id_to_branch_names[leaf]
       deviate_commit_id = leaf
@@ -204,7 +204,7 @@ def test_python_api():
 
   def info(root_rit_dir, refs, all):
     rit_res = query_cmd(root_rit_dir=root_rit_dir)
-    resolved_refs = rit.resolve_refs(rit_res, refs, all)
+    resolved_refs = rit_lib.resolve_refs(rit_res, refs, all)
     commit_id_to_branch_names = rit_res.get_commit_id_to_branch_names()
     return resolved_refs, commit_id_to_branch_names
 
@@ -212,11 +212,11 @@ def test_python_api():
   assert len(refs) == 1
   assert refs[0].head is not None
 
-  refs, commit_id_to_branch_names = info(**base_kwargs, refs=[rit.head_ref_name], all=False)
+  refs, commit_id_to_branch_names = info(**base_kwargs, refs=[rit_lib.head_ref_name], all=False)
   assert len(refs) == 1
   assert refs[0].head is not None
 
-  refs, commit_id_to_branch_names = info(**base_kwargs, refs=[rit.head_ref_name], all=True)
+  refs, commit_id_to_branch_names = info(**base_kwargs, refs=[rit_lib.head_ref_name], all=True)
   assert len(refs) == 7
   assert refs[0].head is not None
 
@@ -369,7 +369,7 @@ def test_python_api():
   assert rit_res.get_branch('otest_2') is None
   assert rit_res.head.branch_name == 'otest_3'
 
-  reset_cmd(**base_kwargs, ref=rit.head_ref_name, hard=False)
+  reset_cmd(**base_kwargs, ref=rit_lib.head_ref_name, hard=False)
   rit_res = query_cmd(**base_kwargs)
   assert rit_res.get_branch('otest_2') is None
   assert rit_res.head.branch_name == 'otest_3'
@@ -389,7 +389,7 @@ def test_python_api():
   rit_res = query_cmd(**base_kwargs)
   assert rit_res.head.branch_name == 'otest_3'
 
-  reset_cmd(**base_kwargs, ref=rit.head_ref_name, hard=False)
+  reset_cmd(**base_kwargs, ref=rit_lib.head_ref_name, hard=False)
   rit_res = query_cmd(**base_kwargs)
   assert rit_res.head.branch_name == 'otest_3'
 
@@ -420,7 +420,7 @@ def test_python_api():
   rit_res = query_cmd(**base_kwargs)
   assert rit_res.head.commit_id == commit_chain[0]
 
-  reset_cmd(**base_kwargs, ref=rit.head_ref_name, hard=False)
+  reset_cmd(**base_kwargs, ref=rit_lib.head_ref_name, hard=False)
   rit_res = query_cmd(**base_kwargs)
   assert rit_res.head.commit_id == commit_chain[0]
 
