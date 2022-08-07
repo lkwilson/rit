@@ -2,10 +2,10 @@ import time
 from dataclasses import dataclass
 from typing import Callable, Optional
 
-from numpy import base_repr
-
 import rit_lib
 
+
+''' types and ctors '''
 
 @dataclass
 class BackupType:
@@ -18,15 +18,14 @@ class BackupType:
   get_level_names: Callable[[float], list[str]]
   ''' a function that maps the current time into a set of levels '''
 
-second = 1
-minute = 60 * second
-hour = 60 * minute
-day = 24 * hour
-week = 7 * day
-year = 365.25 * day
-month = year / 12
-
 def get_periodic_backup_type():
+  second = 1
+  minute = 60 * second
+  hour = 60 * minute
+  day = 24 * hour
+  # week = 7 * day
+  year = 365.25 * day
+  month = year / 12
 
   def get_level_names(now: float):
     '''
@@ -47,6 +46,7 @@ def get_periodic_backup_type():
 
   return BackupType('periodic', level_max_ages, get_level_names)
 
+''' api '''
 
 def create_backup(rit_dir: str):
   backup_type = get_periodic_backup_type()
@@ -90,74 +90,10 @@ def create_backup(rit_dir: str):
         rit_lib.checkout_cmd(root_rit_dir=rit_dir, orphan=False, ref_or_name=branch.commit_id, force=False)
     rit_lib.reset_cmd(root_rit_dir=rit_dir, ref=branch_name, hard=False)
     rit_lib.checkout_cmd(root_rit_dir=rit_dir, orphan=False, ref_or_name=branch_name, force=False)
-    rit_lib.commit_cmd(root_rit_dir=rit_dir, msg="Partial backup")
-
-  base_branch.name
-  # post:
-  # if branch is None, then you need to create branch_name off of base_branch
-  # if base_branch is None, then creating the branch means orphan
-  # if branch is not None, then create the backup as an extension of branch.name
+    rit_lib.commit_cmd(root_rit_dir=rit_dir, msg="Extension backup")
 
   for branch_name in branch_names:
     rit_lib.branch_cmd(root_rit_dir=rit_dir, name=branch_name, ref=None, force=True, delete=False)
-
-    branch = rit_res.get_branch(base_branch)
-
-  if branch is None:
-    rit_lib.checkout_cmd(root_rit_dir=rit_dir, orphan=True, ref_or_name=base_branch, force=None)
-    rit_lib.commit_cmd(root_rit_dir=rit_dir, msg="Full standard backup")
-  else:
-    while branch_names:
-      branch_name = branch_names.pop(0)
-    for branch_name in branch_names:
-      branch = rit_res.get_branch(branch_name)
-      if branch is not None:
-        base_branch = branch_name
-      else:
-        # create branch
-        rit_lib.checkout_cmd(root_rit_dir=rit_dir, orphan=True, ref_or_name=branch_name, force=None)
-        rit_lib.reset_cmd(root_rit_dir=rit_dir, ref=base_branch, hard=False)
-        break
-    pass
-
-  for branch_name in branch_names:
-    rit_lib.branch_cmd(root_rit_dir=rit_dir, name=branch_name, ref=None, force=True, delete=False)
-
-  while branch_names:
-    next_branch = branch_names.pop()
-    branch = rit_res.get_branch(base_branch)
-    if branch is not None:
-      base_branch = next_branch
-      continue
-
-
-  base_branch: Optional[rit_lib.Branch] = None
-  for branch_name in branch_names[::-1]:
-    branch = rit_res.get_branch(branch_name)
-    if branch is not None:
-      base_branch = branch
-      break
-  # post: base_branch points to what should be parent commit, which could be None
-
-
-  # find first non existent branch
-  # if branch is base, create orphan branch for it and commit
-  # else if other branch, create orphan branch and soft reset to previous and commit
-  # else if no branch, then checkout current commit, soft reset to tail branch, check it out, and commit
-
-  '''
-  extensions
-  for branch in branches:
-    if branch not exists:
-      base = branch
-  base, *mid, tail = branches
-  if base not exists:
-    orphan
-    commit
-    ...
-    base = branch
-  tail = branches[-1]
-  '''
 
 def prune_backup(backup_type: BackupType):
   pass
