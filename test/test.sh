@@ -8,10 +8,8 @@ bad() {
 
 set -e
 
-rit_bin=../rit_lib.py
 
-
-cd "$(dirname "$(realpath "$BASH_SOURCE")")"
+cd "$(dirname "$(realpath "$BASH_SOURCE")")/.."
 
 export TEST_ROOT_RIT_DIR=rit_test_dir
 rm -rf "$TEST_ROOT_RIT_DIR"
@@ -22,7 +20,10 @@ rm -rf "$TEST_ROOT_RIT_DIR"
 mkdir "$TEST_ROOT_RIT_DIR"
 cd "$TEST_ROOT_RIT_DIR"
 
+rit_bin=../bin/rit
+
 set -x
+[ -x "$rit_bin" ] || bad
 python "$rit_bin" "$@" init || bad
 python "$rit_bin" "$@" init && bad
 python "$rit_bin" "$@" branch first && bad
@@ -129,6 +130,7 @@ python "$rit_bin" "$@" prune || bad
 num_commits_after=$(ls .rit/backups/ | wc -l)
 [ $num_commits_before -eq $num_commits_after ] && bad
 
+rm -rf "$TEST_ROOT_RIT_DIR"
 set +x
 
 echo "All tests succeeded!"

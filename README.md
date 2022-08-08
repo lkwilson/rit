@@ -14,7 +14,7 @@ It is space efficient and fast.
 The rit script is standalone. Add it to your path, name it whatever you want, and run it:
 
 ```
-python rit_lib.py --help
+rit --help
 ```
 
 ### Convert directory to a rit directory
@@ -121,14 +121,14 @@ reset the directory to the target commit with a `--force` flag.
 
 ## All CLI Help Outputs
 ```
-$ python rit_lib.py  --help
+$ rit  --help
 usage: rit_lib.py [--verbose] [--quiet] {init,commit,checkout,reset,branch,show,status,log,prune}
 rit_lib.py: error: the following arguments are required: command
 ```
 
 ## `rit init`
 ```
-$ python rit_lib.py init --help
+$ rit init --help
 usage: rit_lib.py init [-h]
 
 Initialize a raw backup directory
@@ -139,7 +139,7 @@ optional arguments:
 
 ## `rit commit`
 ```
-$ python rit_lib.py commit --help
+$ rit commit --help
 usage: rit_lib.py commit [-h] msg
 
 Create a commit from the current state
@@ -153,7 +153,7 @@ optional arguments:
 
 ## `rit checkout`
 ```
-$ python rit_lib.py checkout --help
+$ rit checkout --help
 usage: rit_lib.py checkout [-h] [-f] ref
 
 Log the current commit history
@@ -182,7 +182,7 @@ optional arguments:
 
 ## `rit branch`
 ```
-$ python rit_lib.py branch --help
+$ rit branch --help
 usage: rit_lib.py branch [-h] [-f] [-d] [name] [ref]
 
 Create a new branch
@@ -199,7 +199,7 @@ optional arguments:
 
 ## `rit show``
 ```
-$ python rit_lib.py show --help
+$ rit show --help
 usage: rit_lib.py show [-h] [ref]
 
 Show contents of a commit
@@ -213,7 +213,7 @@ optional arguments:
 
 ## `rit status`
 ```
-$ python rit_lib.py status --help
+$ rit status --help
 usage: rit_lib.py status [-h]
 
 Show the current directory's diff state.
@@ -224,7 +224,7 @@ optional arguments:
 
 ## `rit log`
 ```
-$ python rit_lib.py log --help
+$ rit log --help
 usage: rit_lib.py log [-h] [--all] [--full] [refs ...]
 
 Log the current commit history
@@ -240,7 +240,7 @@ optional arguments:
 
 ## `rit prune`
 ```
-$ python rit_lib.py prune --help
+$ rit prune --help
 usage: rit_lib.py prune [-h]
 
 Prune commits not part of a branch or head
