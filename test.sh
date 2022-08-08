@@ -8,7 +8,7 @@ bad() {
 
 set -e
 
-rit_bin=../rit.py
+rit_bin=../rit_lib.py
 
 
 cd "$(dirname "$(realpath "$BASH_SOURCE")")"

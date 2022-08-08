@@ -14,7 +14,7 @@ It is space efficient and fast.
 The rit script is standalone. Add it to your path, name it whatever you want, and run it:
 
 ```
-python rit.py --help
+python rit_lib.py --help
 ```
 
 ### Convert directory to a rit directory
@@ -121,15 +121,15 @@ reset the directory to the target commit with a `--force` flag.
 
 ## All CLI Help Outputs
 ```
-$ python rit.py  --help
-usage: rit.py [--verbose] [--quiet] {init,commit,checkout,reset,branch,show,status,log,prune}
-rit.py: error: the following arguments are required: command
+$ python rit_lib.py  --help
+usage: rit_lib.py [--verbose] [--quiet] {init,commit,checkout,reset,branch,show,status,log,prune}
+rit_lib.py: error: the following arguments are required: command
 ```
 
 ## `rit init`
 ```
-$ python rit.py init --help
-usage: rit.py init [-h]
+$ python rit_lib.py init --help
+usage: rit_lib.py init [-h]
 
 Initialize a raw backup directory
 
@@ -139,8 +139,8 @@ optional arguments:
 
 ## `rit commit`
 ```
-$ python rit.py commit --help
-usage: rit.py commit [-h] msg
+$ python rit_lib.py commit --help
+usage: rit_lib.py commit [-h] msg
 
 Create a commit from the current state
 
@@ -153,8 +153,8 @@ optional arguments:
 
 ## `rit checkout`
 ```
-$ python rit.py checkout --help
-usage: rit.py checkout [-h] [-f] ref
+$ python rit_lib.py checkout --help
+usage: rit_lib.py checkout [-h] [-f] ref
 
 Log the current commit history
 
@@ -168,7 +168,7 @@ optional arguments:
 
 ## `rit reset`
 ```
-usage: rit.py reset [-h] [--hard] [ref]
+usage: rit_lib.py reset [-h] [--hard] [ref]
 
 Log the current commit history
 
@@ -182,8 +182,8 @@ optional arguments:
 
 ## `rit branch`
 ```
-$ python rit.py branch --help
-usage: rit.py branch [-h] [-f] [-d] [name] [ref]
+$ python rit_lib.py branch --help
+usage: rit_lib.py branch [-h] [-f] [-d] [name] [ref]
 
 Create a new branch
 
@@ -199,8 +199,8 @@ optional arguments:
 
 ## `rit show``
 ```
-$ python rit.py show --help
-usage: rit.py show [-h] [ref]
+$ python rit_lib.py show --help
+usage: rit_lib.py show [-h] [ref]
 
 Show contents of a commit
 
@@ -213,8 +213,8 @@ optional arguments:
 
 ## `rit status`
 ```
-$ python rit.py status --help
-usage: rit.py status [-h]
+$ python rit_lib.py status --help
+usage: rit_lib.py status [-h]
 
 Show the current directory's diff state.
 
@@ -224,8 +224,8 @@ optional arguments:
 
 ## `rit log`
 ```
-$ python rit.py log --help
-usage: rit.py log [-h] [--all] [--full] [refs ...]
+$ python rit_lib.py log --help
+usage: rit_lib.py log [-h] [--all] [--full] [refs ...]
 
 Log the current commit history
 
@@ -240,8 +240,8 @@ optional arguments:
 
 ## `rit prune`
 ```
-$ python rit.py prune --help
-usage: rit.py prune [-h]
+$ python rit_lib.py prune --help
+usage: rit_lib.py prune [-h]
 
 Prune commits not part of a branch or head
 
@@ -276,8 +276,8 @@ Some deviations are made since we don't have the same limitations as git.
 # Development
 Contributions welcome!
 ## How to test
-- You can import `rit.py` and use the python api.
-- You can run `rit.py` directly. 
+- You can import `rit_lib.py` and use the python api.
+- You can run `rit_lib.py` directly. 
 - You can run the helper script in bin.
 - You can add bin to your PATH, and run `rit`.
 
