@@ -38,7 +38,15 @@ class BackupType:
   A manual backup point is created and labeled. These are never deleted.
   '''
 
-  number_of_restore_points_to_save: int
+  quick_prefix: str
+  '''
+  The branch prefix of a branch that was manually created quickly.
+  '''
+
+  restore_count: int
+  ''' the number of restore points to preserver before pruning '''
+
+  quick_count: int
   ''' the number of restore points to preserver before pruning '''
 
   max_level_ages: list[float]
@@ -126,6 +134,17 @@ def create_backup(rit_dir: str, msg: str):
 
   return backup_commit
 
+def manual_backup(rit_dir: str, msg: str, branch_name: str):
+  backup_type = get_periodic_backup_type()
+  full_branch_name = f'{backup_type.manual_prefix}__{branch_name}'
+  backup = create_backup(rit_dir, msg)
+  rit_lib.branch_cmd(root_rit_dir=rit_dir, name=full_branch_name, ref=backup.commit_id, force=True, delete=False)
+
+def quick_backup(rit_dir: str):
+  backup_type = get_periodic_backup_type()
+  backup = create_backup(rit_dir, 'Quick backup')
+  shift_branches(rit_dir, backup_type.quick_count, backup_type.quick_prefix, 'global', backup.commit_id)
+
 def prune_backup(rit_dir: str):
   backup_type = get_periodic_backup_type()
   now = time.time()
@@ -163,8 +182,8 @@ def restore_to_point(rit_dir: str, ref: Optional[str]):
   pre_restore_commit = create_backup(rit_dir, "Before restoration")
   rit_lib.checkout_cmd(root_rit_dir=rit_dir, orphan=False, ref_or_name=res.commit.commit_id, force=True)
 
-  shift_branches(rit_dir, backup_type.number_of_restore_points_to_save, backup_type.restore_prefix, 'before', pre_restore_commit.commit_id)
-  shift_branches(rit_dir, backup_type.number_of_restore_points_to_save, backup_type.restore_prefix, 'after', res.commit.commit_id)
+  shift_branches(rit_dir, backup_type.restore_count, backup_type.restore_prefix, 'before', pre_restore_commit.commit_id)
+  shift_branches(rit_dir, backup_type.restore_count, backup_type.restore_prefix, 'after', res.commit.commit_id)
 
 def shift_branches(rit_dir: str, max_count: int, prefix: str, suffix: str, new_initial: Optional[str]):
   # build branch update map
