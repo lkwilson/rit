@@ -163,25 +163,22 @@ def restore_to_point(rit_dir: str, ref: Optional[str]):
   pre_restore_commit = create_backup(rit_dir, "Before restoration")
   rit_lib.checkout_cmd(root_rit_dir=rit_dir, orphan=False, ref_or_name=res.commit.commit_id, force=True)
 
-  # build branch update map
-  shift_updates = {
-    f'{backup_type.restore_prefix}__idx_1__before': pre_restore_commit.commit_id,
-    f'{backup_type.restore_prefix}__idx_1__after': res.commit.commit_id,
-  }
-  for idx in range(backup_type.number_of_restore_points_to_save-1, 0, -1):
-    before_current_name = f'{backup_type.restore_prefix}__idx_{idx}__before'
-    after_current_name = f'{backup_type.restore_prefix}__idx_{idx}__after'
-    updated_index = idx + 1
-    before_updated_name = f'{backup_type.restore_prefix}__idx_{updated_index}__before'
-    after_updated_name = f'{backup_type.restore_prefix}__idx_{updated_index}__after'
+  shift_branches(rit_dir, backup_type.number_of_restore_points_to_save, backup_type.restore_prefix, 'before', pre_restore_commit.commit_id)
+  shift_branches(rit_dir, backup_type.number_of_restore_points_to_save, backup_type.restore_prefix, 'after', res.commit.commit_id)
 
-    rit_res = rit_lib.query_cmd(root_rit_dir=rit_dir)
-    before_current = rit_res.get_branch(before_current_name)
-    if before_current is not None:
-      shift_updates[before_updated_name] = before_current.commit_id
-    after_current = rit_res.get_branch(after_current_name)
-    if after_current is not None:
-      shift_updates[after_updated_name] = after_current.commit_id
+def shift_branches(rit_dir: str, max_count: int, prefix: str, suffix: str, new_initial: Optional[str]):
+  # build branch update map
+  shift_updates = {}
+  if new_initial is not None:
+    shift_updates[f'{prefix}__idx_1__{suffix}'] = new_initial
+  rit_res = rit_lib.query_cmd(root_rit_dir=rit_dir)
+  for idx in range(max_count-1, 0, -1):
+    current_name = f'{prefix}__idx_{idx}__{suffix}'
+    updated_name = f'{prefix}__idx_{idx + 1}__{suffix}'
+    current = rit_res.get_branch(current_name)
+    if current is None:
+      continue
+    shift_updates[updated_name] = current.commit_id
 
   for branch_name, branch_commit in shift_updates.items():
     rit_lib.branch_cmd(root_rit_dir=rit_dir, name=branch_name, ref=branch_commit, force=True, delete=False)
