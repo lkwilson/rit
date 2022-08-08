@@ -60,7 +60,7 @@ def get_periodic_backup_type():
   minute = 60 * second
   hour = 60 * minute
   day = 24 * hour
-  # week = 7 * day
+  week = 7 * day
   year = 365.25 * day
   month = year / 12
 
@@ -76,12 +76,33 @@ def get_periodic_backup_type():
 
     Thus, this function must return at least 2 levels.
     '''
-    # year, month, day, hour, 15 minute mark, exact minute
-    return ['2022_05', '02', '12', '15']
 
-  level_max_ages = [0, year, 3*month, month]
+    gmtime = time.gmtime(now)
+    minutes = (gmtime.tm_min // 10) * 10
+    return [
+      f'{gmtime.tm_year:04d}_{gmtime.tm_mon:02d}',
+      f'{gmtime.tm_mday:02d}',
+      f'{gmtime.tm_hour:02d}',
+      f'{minutes:02d}',
+    ]
 
-  return BackupType('periodic', level_max_ages, get_level_names)
+  max_level_ages = [
+    0,
+    year,
+    3*month,
+    3*week,
+  ]
+
+  return BackupType(
+    periodic_prefix='periodic',
+    restore_prefix='restore',
+    manual_prefix='manual',
+    quick_prefix='quick',
+    restore_count=10,
+    quick_count=10,
+    max_level_ages=max_level_ages,
+    get_level_names=get_level_names,
+  )
 
 ''' api '''
 
@@ -157,6 +178,10 @@ def prune_backup(rit_dir: str):
     if match is None:
       continue
     level = int(match.groups()[0])
+    max_age = backup_type.max_level_ages[level]
+    if max_age == 0:
+      continue
+
     branch = rit_res.get_branch(branch_name)
     if branch is None:
       continue
@@ -164,7 +189,6 @@ def prune_backup(rit_dir: str):
     if commit is None:
       continue
     age = now - commit.create_time
-    max_age = backup_type.max_level_ages[level]
     if age > max_age:
       pending_prune.append(branch_name)
 
