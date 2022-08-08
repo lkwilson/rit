@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-
 from io import DEFAULT_BUFFER_SIZE
 import subprocess
 import shutil
@@ -1431,7 +1429,7 @@ def setup_logger(verbose: int):
   logging.addLevelName(logging.WARNING, colorize(fg + yellow, logging.getLevelName(logging.WARNING)[0]))
   logging.addLevelName(logging.ERROR, colorize(fg + red, logging.getLevelName(logging.ERROR)[0]))
 
-def main(argv):
+def run(argv):
   parser = argparse.ArgumentParser(description="A raw version control system", add_help=False)
   parser.add_argument('command', choices=command_handlers.keys())
   parser.add_argument('--verbose', '-v', help="Increase logging level. Default level is info.", action='count', default=0)
@@ -1442,10 +1440,9 @@ def main(argv):
   setup_logger(args.verbose - args.quiet)
   try:
     command_handlers[args.command](sub_argv, prog=f'{parser.prog} {args.command}')
-    return 0
   except RitError as exc:
     logger.error(exc.msg, *exc.args)
-    return 1
+    raise
 
-if __name__ == '__main__':
-  sys.exit(main(sys.argv[1:]))
+def main():
+  run(sys.argv[1:])
