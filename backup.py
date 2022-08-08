@@ -5,6 +5,9 @@ from typing import Callable, Optional
 
 import rit_lib
 
+# TODO: THIS FILE IS COMPLETELY UNTESTED
+assert False, "THIS FILE IS COMPLETELY UNTESTED, DON'T USE IT."
+
 
 ''' types and ctors '''
 
